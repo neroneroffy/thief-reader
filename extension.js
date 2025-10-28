@@ -134,16 +134,19 @@ class ThiefReaderWebviewProvider {
 	async _restoreData() {
 		try {
 			this._isRestoring = true;
-			this._statusBarItem.text = "thief-reader: 正在恢复数据...";
 			
 			// 加载保存的文件列表
 			const savedFiles = await this._storageManager.loadFiles();
 			
-			if (savedFiles.length === 0) {
+			// 第一次安装或没有保存的数据
+			if (!savedFiles || savedFiles.length === 0) {
 				this._statusBarItem.text = "thief-reader: 准备就绪";
 				this._isRestoring = false;
 				return;
 			}
+			
+			// 有数据需要恢复时才显示恢复中的提示
+			this._statusBarItem.text = "thief-reader: 正在恢复数据...";
 			
 			const restoredFiles = [];
 			const failedFiles = [];
@@ -236,19 +239,21 @@ class ThiefReaderWebviewProvider {
 			// 更新文件列表
 			this._pdfFiles = restoredFiles;
 			
-			// 显示恢复结果
-			if (failedFiles.length > 0) {
-				const message = `恢复了 ${restoredFiles.length} 个文件，其中 ${failedFiles.length} 个加载失败`;
-				vscode.window.showWarningMessage(message, '查看详情', '清理失效文件').then(selection => {
-					if (selection === '查看详情') {
-						const details = failedFiles.map(f => `• ${f.name}: ${f.reason}`).join('\n');
-						vscode.window.showInformationMessage(details);
-					} else if (selection === '清理失效文件') {
-						this._cleanupMissingFiles();
-					}
-				});
-			} else {
-				vscode.window.showInformationMessage(`成功恢复 ${restoredFiles.length} 个文件`);
+			// 显示恢复结果（只在有文件时显示）
+			if (restoredFiles.length > 0) {
+				if (failedFiles.length > 0) {
+					const message = `恢复了 ${restoredFiles.length} 个文件，其中 ${failedFiles.length} 个加载失败`;
+					vscode.window.showWarningMessage(message, '查看详情', '清理失效文件').then(selection => {
+						if (selection === '查看详情') {
+							const details = failedFiles.map(f => `• ${f.name}: ${f.reason}`).join('\n');
+							vscode.window.showInformationMessage(details);
+						} else if (selection === '清理失效文件') {
+							this._cleanupMissingFiles();
+						}
+					});
+				} else {
+					vscode.window.showInformationMessage(`成功恢复 ${restoredFiles.length} 个文件`);
+				}
 			}
 			
 			// 恢复阅读位置
@@ -272,43 +277,48 @@ class ThiefReaderWebviewProvider {
 	 * 恢复阅读状态
 	 */
 	async _restoreReadingState() {
-		const state = await this._storageManager.loadReadingState();
-		
-		if (!state || !state.currentFileId) {
+		try {
+			const state = await this._storageManager.loadReadingState();
+			
+			if (!state || !state.currentFileId) {
+				this._statusBarItem.text = "thief-reader: 准备就绪";
+				return;
+			}
+			
+			// 查找文件
+			const file = this._pdfFiles.find(f => f.id === state.currentFileId);
+			
+			if (!file) {
+				// 文件已被删除
+				this._statusBarItem.text = "thief-reader: 准备就绪";
+				return;
+			}
+			
+			if (file.status === 'missing' || file.status === 'error') {
+				// 文件不可用
+				vscode.window.showWarningMessage(
+					`上次阅读的文件 "${file.name}" 无法加载，请重新选择文件`
+				);
+				this._statusBarItem.text = "thief-reader: 准备就绪";
+				return;
+			}
+			
+			// 恢复选择
+			this._currentPdf = file;
+			
+			// 使用文件自己保存的阅读位置
+			this._restoreFileReadingPosition(file);
+			
+			// 显示内容
+			if (this._currentChapter !== null && file.chapters && file.chapters.length > 0) {
+				const chapter = file.chapters[this._currentChapter];
+				this._displayChapterText(chapter);
+			} else {
+				this._statusBarItem.text = `thief-reader: 已恢复 ${file.name}`;
+			}
+		} catch (error) {
+			console.error('恢复阅读状态失败:', error);
 			this._statusBarItem.text = "thief-reader: 准备就绪";
-			return;
-		}
-		
-		// 查找文件
-		const file = this._pdfFiles.find(f => f.id === state.currentFileId);
-		
-		if (!file) {
-			// 文件已被删除
-			this._statusBarItem.text = "thief-reader: 准备就绪";
-			return;
-		}
-		
-		if (file.status === 'missing' || file.status === 'error') {
-			// 文件不可用
-			vscode.window.showWarningMessage(
-				`上次阅读的文件 "${file.name}" 无法加载，请重新选择文件`
-			);
-			this._statusBarItem.text = "thief-reader: 准备就绪";
-			return;
-		}
-		
-		// 恢复选择
-		this._currentPdf = file;
-		
-		// 使用文件自己保存的阅读位置
-		this._restoreFileReadingPosition(file);
-		
-		// 显示内容
-		if (this._currentChapter !== null && file.chapters && file.chapters.length > 0) {
-			const chapter = file.chapters[this._currentChapter];
-			this._displayChapterText(chapter);
-		} else {
-			this._statusBarItem.text = `thief-reader: 已恢复 ${file.name}`;
 		}
 	}
 
