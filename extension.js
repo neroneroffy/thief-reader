@@ -122,7 +122,7 @@ class ThiefReaderWebviewProvider {
 	 */
 	_initStatusBar() {
 		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-		this._statusBarItem.text = "thief-reader: 准备就绪";
+		this._statusBarItem.text = "reader: 准备就绪";
 		this._statusBarItem.tooltip = '使用 Alt + 方向键滚动文字';
 		this._statusBarItem.show();
 		this._context.subscriptions.push(this._statusBarItem);
@@ -140,13 +140,13 @@ class ThiefReaderWebviewProvider {
 			
 			// 第一次安装或没有保存的数据
 			if (!savedFiles || savedFiles.length === 0) {
-				this._statusBarItem.text = "thief-reader: 准备就绪";
+				this._statusBarItem.text = "reader: 准备就绪";
 				this._isRestoring = false;
 				return;
 			}
 			
 			// 有数据需要恢复时才显示恢复中的提示
-			this._statusBarItem.text = "thief-reader: 正在恢复数据...";
+			this._statusBarItem.text = "reader: 正在恢复数据...";
 			
 			const restoredFiles = [];
 			const failedFiles = [];
@@ -268,7 +268,7 @@ class ThiefReaderWebviewProvider {
 		} catch (error) {
 			console.error('恢复数据失败:', error);
 			vscode.window.showErrorMessage('恢复阅读数据失败: ' + error.message);
-			this._statusBarItem.text = "thief-reader: 准备就绪";
+			this._statusBarItem.text = "reader: 准备就绪";
 			this._isRestoring = false;
 		}
 	}
@@ -281,7 +281,7 @@ class ThiefReaderWebviewProvider {
 			const state = await this._storageManager.loadReadingState();
 			
 			if (!state || !state.currentFileId) {
-				this._statusBarItem.text = "thief-reader: 准备就绪";
+				this._statusBarItem.text = "reader: 准备就绪";
 				return;
 			}
 			
@@ -290,7 +290,7 @@ class ThiefReaderWebviewProvider {
 			
 			if (!file) {
 				// 文件已被删除
-				this._statusBarItem.text = "thief-reader: 准备就绪";
+				this._statusBarItem.text = "reader: 准备就绪";
 				return;
 			}
 			
@@ -299,7 +299,7 @@ class ThiefReaderWebviewProvider {
 				vscode.window.showWarningMessage(
 					`上次阅读的文件 "${file.name}" 无法加载，请重新选择文件`
 				);
-				this._statusBarItem.text = "thief-reader: 准备就绪";
+				this._statusBarItem.text = "reader: 准备就绪";
 				return;
 			}
 			
@@ -314,11 +314,11 @@ class ThiefReaderWebviewProvider {
 				const chapter = file.chapters[this._currentChapter];
 				this._displayChapterText(chapter);
 			} else {
-				this._statusBarItem.text = `thief-reader: 已恢复 ${file.name}`;
+				this._statusBarItem.text = `reader: 已恢复 ${file.name}`;
 			}
 		} catch (error) {
 			console.error('恢复阅读状态失败:', error);
-			this._statusBarItem.text = "thief-reader: 准备就绪";
+			this._statusBarItem.text = "reader: 准备就绪";
 		}
 	}
 
@@ -382,7 +382,7 @@ class ThiefReaderWebviewProvider {
 			this._currentPdf = null;
 			this._currentChapter = null;
 			this._scrollOffset = 0;
-			this._statusBarItem.text = "thief-reader: 准备就绪";
+			this._statusBarItem.text = "reader: 准备就绪";
 		}
 		
 		this._saveCurrentState();
@@ -927,7 +927,7 @@ class ThiefReaderWebviewProvider {
 			const fileName = path.basename(filePath);
 			const fileExtension = path.extname(filePath).toLowerCase();
 			
-			this._statusBarItem.text = `thief-reader: 正在解析 ${fileName}...`;
+			this._statusBarItem.text = `reader: 正在解析 ${fileName}...`;
 			
 			let fileContent = '';
 			let pageCount = 1;
@@ -1000,17 +1000,17 @@ class ThiefReaderWebviewProvider {
 					}
 					
 					this._pdfFiles[existingIndex] = fileInfo;
-					this._statusBarItem.text = `thief-reader: 已重新加载 ${fileName}`;
+					this._statusBarItem.text = `reader: 已重新加载 ${fileName}`;
 					vscode.window.showInformationMessage(`成功重新加载${fileInfo.type}文件: ${fileName}`);
 				} else {
 					// 用户取消，不做任何操作
-					this._statusBarItem.text = `thief-reader: 取消加载`;
+					this._statusBarItem.text = `reader: 取消加载`;
 					return;
 				}
 			} else {
 				// 新文件，直接添加
 				this._pdfFiles.push(fileInfo);
-				this._statusBarItem.text = `thief-reader: 已加载 ${fileName}`;
+				this._statusBarItem.text = `reader: 已加载 ${fileName}`;
 				vscode.window.showInformationMessage(`成功加载${fileInfo.type}文件: ${fileName}`);
 			}
 			
@@ -1020,7 +1020,7 @@ class ThiefReaderWebviewProvider {
 			// 刷新界面
 			this._refreshView();
 		} catch (error) {
-			this._statusBarItem.text = "thief-reader: 加载失败";
+			this._statusBarItem.text = "reader: 加载失败";
 			vscode.window.showErrorMessage(`加载文件失败: ${error.message}`);
 		}
 	}
@@ -1179,7 +1179,7 @@ class ThiefReaderWebviewProvider {
 	 */
 	async _loadPastedContent(content) {
 		try {
-			this._statusBarItem.text = "thief-reader: 正在解析粘贴内容...";
+			this._statusBarItem.text = "reader: 正在解析粘贴内容...";
 			
 			// 解析章节
 			const chapters = this._extractChaptersWithFallback(content);
@@ -1209,7 +1209,7 @@ class ThiefReaderWebviewProvider {
 			this._currentPage = 0;
 			this._scrollOffset = 0;
 
-			this._statusBarItem.text = `thief-reader: 已加载粘贴内容`;
+			this._statusBarItem.text = `reader: 已加载粘贴内容`;
 			vscode.window.showInformationMessage(`成功加载粘贴内容，共${chapters.length}个章节`);
 			
 			// 保存状态
@@ -1218,7 +1218,7 @@ class ThiefReaderWebviewProvider {
 			// 刷新界面
 			this._refreshView();
 		} catch (error) {
-			this._statusBarItem.text = "thief-reader: 加载失败";
+			this._statusBarItem.text = "reader: 加载失败";
 			vscode.window.showErrorMessage(`加载粘贴内容失败: ${error.message}`);
 		}
 	}
@@ -1459,9 +1459,9 @@ class ThiefReaderWebviewProvider {
 		if (this._currentChapter !== null && file.chapters && file.chapters.length > 0) {
 			const chapter = file.chapters[this._currentChapter];
 			this._displayChapterText(chapter);
-			this._statusBarItem.text = `thief-reader: ${file.name} - ${chapter.title}`;
+			this._statusBarItem.text = `reader: ${file.name} - ${chapter.title}`;
 		} else {
-			this._statusBarItem.text = `thief-reader: 已选择 ${file.name} [${file.type}]`;
+			this._statusBarItem.text = `reader: 已选择 ${file.name} [${file.type}]`;
 		}
 		
 		// 步骤5：保存状态并刷新界面
@@ -1528,7 +1528,7 @@ class ThiefReaderWebviewProvider {
 		const alpha = (this._opacity / 100).toFixed(2);
 		this._statusBarItem.color = `rgba(135, 135, 135, ${alpha})`;
 
-		this._statusBarItem.text = `thief-reader: ${chapter.title}${scrollIndicator} - ${displayContent}`;
+		this._statusBarItem.text = `reader: ${chapter.title}${scrollIndicator} - ${displayContent}`;
 	}
 
 	/**
@@ -1548,7 +1548,7 @@ class ThiefReaderWebviewProvider {
 				this._currentChapter = null;
 				this._currentPage = 0;
 				this._scrollOffset = 0;
-				this._statusBarItem.text = "thief-reader: 准备就绪";
+				this._statusBarItem.text = "reader: 准备就绪";
 			}
 			
 			vscode.window.showInformationMessage(`已删除${fileType}文件: ${fileName}`);
@@ -1673,11 +1673,11 @@ class ThiefReaderWebviewProvider {
 				const chapter = this._currentPdf.chapters[this._currentChapter];
 				this._displayChapterText(chapter);
 			} else {
-				this._statusBarItem.text = "thief-reader: 准备就绪";
+				this._statusBarItem.text = "reader: 准备就绪";
 			}
 		} else {
 			// 隐藏状态栏文字（只显示图标或简短提示）
-			this._statusBarItem.text = "thief-reader: 📖";
+			this._statusBarItem.text = "reader: 📖";
 		}
 	}
 
