@@ -1,0 +1,94 @@
+{
+  "name": "thief-reader",
+  "displayName": "thief-reader",
+  "description": "一个隐蔽的 VSCode 阅读器插件，支持 PDF、TXT、EPUB，使用 Alt + 方向键在状态栏中低调阅读",
+  "version": "0.0.3",
+  "publisher": "nernerffy",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [{
+      "command": "thief-reader.open",
+      "title": "thief-reader: 打开"
+    }, {
+      "command": "thief-reader.previousPage",
+      "title": "thief-reader: 上一页"
+    }, {
+      "command": "thief-reader.nextPage",
+      "title": "thief-reader: 下一页"
+    }, {
+      "command": "thief-reader.scrollLeft",
+      "title": "thief-reader: 向左滑动"
+    }, {
+      "command": "thief-reader.scrollRight",
+      "title": "thief-reader: 向右滑动"
+    }, {
+      "command": "thief-reader.toggleVisibility",
+      "title": "thief-reader: 切换状态栏文字显示/隐藏"
+    }],
+    "keybindings": [{
+      "command": "thief-reader.previousPage",
+      "key": "alt+shift+left"
+    }, {
+      "command": "thief-reader.nextPage",
+      "key": "alt+shift+right"
+    }, {
+      "command": "thief-reader.scrollLeft",
+      "key": "alt+left"
+    }, {
+      "command": "thief-reader.scrollRight",
+      "key": "alt+right"
+    }, {
+      "command": "thief-reader.toggleVisibility",
+      "key": "shift+space"
+    }],
+    "viewsContainers": {
+      "activitybar": [{
+        "id": "thief-reader-explorer",
+        "title": "thief-reader",
+        "icon": "main-icon.png"
+      }]
+    },
+    "views": {
+      "thief-reader-explorer": [{
+        "id": "thief-reader-main",
+        "name": "thief-reader 主界面",
+        "type": "webview"
+      }]
+    },
+    "configuration": {
+      "title": "thief-reader",
+      "properties": {
+        "thief-reader.statusBarOpacity": {
+          "type": "number",
+          "default": 100,
+          "minimum": 5,
+          "maximum": 100,
+          "description": "状态栏文字区域的透明度 (5-100)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "pretest": "npm run lint",
+    "test": "vscode-test"
+  },
+  "dependencies": {
+    "pdf-parse": "^1.1.1",
+    "epub2": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "eslint": "^9.36.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
