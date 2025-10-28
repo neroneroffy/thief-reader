@@ -2,7 +2,7 @@
   "name": "thief-reader",
   "displayName": "thief-reader",
   "description": "一个隐蔽的 VSCode 阅读器插件，支持 PDF、TXT、EPUB，使用 Alt + 方向键在状态栏中低调阅读",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "neroneroffy",
   "icon": "main-icon.png",
   "repository": "https://github.com/neroneroffy/thief-reader",
