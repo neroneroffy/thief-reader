@@ -7,6 +7,1611 @@ const pdf = require('pdf-parse');
 const EPub = require('epub2').EPub;
 
 /**
+ * Alt键状态管理器类 - 监听和管理Alt键状态
+ */
+class AltKeyManager {
+	constructor() {
+		this._isAltPressed = false;
+		this._listeners = [];
+		this._disposables = [];
+		this._forceEnabled = false; // 强制启用悬停功能（绕过Alt键检测）
+	}
+
+	/**
+	 * 启动Alt键监听
+	 */
+	startListening() {
+		// 由于VSCode API限制，我们使用编辑器选择变化来模拟键盘事件监听
+		// 这里我们会在后续通过其他方式来检测Alt键状态
+		console.log('Alt键监听已启动');
+	}
+
+	/**
+	 * 检查Alt键是否按下
+	 */
+	isAltPressed() {
+		return this._isAltPressed;
+	}
+
+	/**
+	 * 设置Alt键状态（通过其他方式触发）
+	 */
+	setAltPressed(pressed) {
+		const wasPressed = this._isAltPressed;
+		this._isAltPressed = pressed;
+		
+		// 通知监听器
+		if (wasPressed !== pressed) {
+			this._notifyListeners(pressed);
+		}
+	}
+
+	/**
+	 * 强制启用/禁用悬停功能（绕过Alt键检测限制）
+	 */
+	setForceEnabled(enabled) {
+		this._forceEnabled = enabled;
+		console.log(`悬停功能强制${enabled ? '启用' : '禁用'}`);
+	}
+
+	/**
+	 * 获取强制启用状态
+	 */
+	isForceEnabled() {
+		return this._forceEnabled;
+	}
+
+	/**
+	 * 切换强制启用状态
+	 */
+	toggleForceEnabled() {
+		this._forceEnabled = !this._forceEnabled;
+		console.log(`悬停功能强制${this._forceEnabled ? '启用' : '禁用'}`);
+		return this._forceEnabled;
+	}
+
+	/**
+	 * 添加状态变化监听器
+	 */
+	addListener(listener) {
+		this._listeners.push(listener);
+	}
+
+	/**
+	 * 移除监听器
+	 */
+	removeListener(listener) {
+		const index = this._listeners.indexOf(listener);
+		if (index > -1) {
+			this._listeners.splice(index, 1);
+		}
+	}
+
+	/**
+	 * 通知所有监听器
+	 */
+	_notifyListeners(isPressed) {
+		this._listeners.forEach(listener => {
+			try {
+				listener(isPressed);
+			} catch (error) {
+				console.error('Alt键状态监听器执行错误:', error);
+			}
+		});
+	}
+
+	/**
+	 * 清理资源
+	 */
+	dispose() {
+		this._disposables.forEach(disposable => disposable.dispose());
+		this._disposables = [];
+		this._listeners = [];
+	}
+}
+
+/**
+ * 滚轮滚动处理器类 - 处理悬浮窗中的滚轮滚动
+ */
+class ScrollWheelHandler {
+	constructor(readerProvider) {
+		this._readerProvider = readerProvider;
+		this._scrollStep = 50; // 每次滚动的字符数
+		this._scrollPosition = 0; // 悬浮窗独立的滚动位置
+		this._maxScrollPosition = 0;
+		this._isInitialized = false;
+	}
+
+	/**
+	 * 初始化滚动位置（与当前阅读位置同步）
+	 */
+	initialize() {
+		if (this._readerProvider._currentFile && this._readerProvider._currentChapter !== null) {
+			this._scrollPosition = this._readerProvider._scrollOffset;
+			this._maxScrollPosition = this._getCurrentChapterLength();
+			this._isInitialized = true;
+		}
+	}
+
+	/**
+	 * 处理滚轮事件
+	 */
+	handleWheelEvent(deltaY, ctrlKey = false) {
+		if (!this._readerProvider._currentFile || this._readerProvider._currentChapter === null) {
+			return null;
+		}
+
+		if (!this._isInitialized) {
+			this.initialize();
+		}
+
+		// 计算滚动步长
+		const step = ctrlKey ? this._scrollStep * 2 : this._scrollStep;
+		const direction = Math.sign(deltaY);
+		
+		// 计算新的滚动位置
+		const newPosition = Math.max(0, this._scrollPosition + (direction * step));
+		const maxPosition = Math.max(0, this._maxScrollPosition - 200); // 保留一些缓冲
+		
+		this._scrollPosition = Math.min(newPosition, maxPosition);
+		
+		// 生成新内容
+		return this._generateScrolledContent();
+	}
+
+	/**
+	 * 获取当前章节长度
+	 */
+	_getCurrentChapterLength() {
+		const currentFile = this._readerProvider._currentFile;
+		if (!currentFile || !currentFile.chapters || this._readerProvider._currentChapter === null) {
+			return 0;
+		}
+		
+		const chapter = currentFile.chapters[this._readerProvider._currentChapter];
+		if (!chapter) return 0;
+		
+		// 使用辅助函数处理内容
+		const fullContent = getChapterContentAsString(chapter);
+		return fullContent.length;
+	}
+
+	/**
+	 * 生成滚动后的内容
+	 */
+	_generateScrolledContent() {
+		const currentFile = this._readerProvider._currentFile;
+		if (!currentFile || !currentFile.chapters || this._readerProvider._currentChapter === null) {
+			return null;
+		}
+
+		const chapter = currentFile.chapters[this._readerProvider._currentChapter];
+		if (!chapter) return null;
+
+		// 获取显示的文字内容
+		const displayLength = 300; // 悬浮窗显示的字符数
+		
+		// 使用辅助函数处理内容
+		const fullContent = getChapterContentAsString(chapter);
+		if (!fullContent) {
+			console.error('Empty or invalid chapter content');
+			return null;
+		}
+		
+		const text = fullContent.substring(this._scrollPosition, this._scrollPosition + displayLength);
+		
+		// 生成位置信息
+		const position = `${this._scrollPosition}-${this._scrollPosition + text.length}/${fullContent.length}`;
+		
+		return {
+			text: text,
+			chapterTitle: chapter.title,
+			position: position,
+			scrollPosition: this._scrollPosition,
+			maxPosition: fullContent.length,
+			hasMore: this._scrollPosition + displayLength < fullContent.length
+		};
+	}
+
+	/**
+	 * 同步滚动位置到状态栏（当悬浮窗隐藏时调用）
+	 */
+	syncToStatusBar() {
+		if (this._readerProvider._currentFile && this._isInitialized) {
+			// 更新主阅读器的滚动位置
+			this._readerProvider._scrollOffset = this._scrollPosition;
+			
+			// 保存当前状态
+			this._readerProvider._saveCurrentState();
+			
+			// 更新状态栏显示
+			this._readerProvider._displayChapterText();
+			
+			console.log(`滚动位置已同步到状态栏: ${this._scrollPosition}`);
+		}
+	}
+
+	/**
+	 * 重置滚动位置
+	 */
+	reset() {
+		this._scrollPosition = 0;
+		this._maxScrollPosition = 0;
+		this._isInitialized = false;
+	}
+
+	/**
+	 * 获取当前滚动位置
+	 */
+	getCurrentPosition() {
+		return this._scrollPosition;
+	}
+
+	/**
+	 * 设置滚动步长
+	 */
+	setScrollStep(step) {
+		this._scrollStep = Math.max(10, Math.min(200, step)); // 限制在合理范围内
+	}
+}
+
+/**
+ * 内容处理辅助函数 - 处理章节内容可能是数组或字符串的情况
+ */
+function getChapterContentAsString(chapter) {
+	if (!chapter || !chapter.content) {
+		return '';
+	}
+
+	if (Array.isArray(chapter.content)) {
+		return chapter.content.join('\n'); // 数组情况：用换行符连接
+	} else if (typeof chapter.content === 'string') {
+		return chapter.content; // 字符串情况：直接使用
+	} else {
+		console.warn('Unexpected chapter.content type:', typeof chapter.content, chapter.content);
+		return String(chapter.content); // 强制转换为字符串
+	}
+}
+
+/**
+ * 悬浮窗管理器类 - 管理Alt+悬停时的悬浮预览窗口
+ */
+class FloatingWindowManager {
+	constructor(context, readerProvider, scrollHandler) {
+		this._context = context;
+		this._readerProvider = readerProvider;
+		this._scrollHandler = scrollHandler;
+		this._webviewPanel = null;
+		this._isVisible = false;
+		this._currentContent = null;
+		this._debounceTimer = null;
+		// 添加滚动位置记录
+		this._lastScrollTop = 0;
+		this._lastScrollPercentage = 0;
+		this._lastCharOffset = 0; // 添加字符偏移量记录
+		this._popupTextOpacity = 100; // 弹窗文字透明度，默认100%
+		this._loadPopupOpacity(); // 从配置中加载透明度
+	}
+
+	/**
+	 * 显示完整章节预览
+	 */
+	async showChapterPreview() {
+		try {
+			const currentFile = this._readerProvider._currentFile;
+			if (!currentFile || this._readerProvider._currentChapter === null) {
+				vscode.window.showWarningMessage('请先加载文件并选择章节');
+				return;
+			}
+
+			const chapter = currentFile.chapters[this._readerProvider._currentChapter];
+			if (!chapter) {
+				vscode.window.showWarningMessage('当前章节无效');
+				return;
+			}
+
+			// 获取完整章节内容
+			const fullContent = getChapterContentAsString(chapter);
+			const currentOffset = this._readerProvider._scrollOffset;
+
+			// 初始化字符偏移量为当前状态栏的偏移量
+			this._lastCharOffset = currentOffset;
+			this._lastScrollPercentage = this._calculateScrollPercentage(currentOffset, fullContent);
+
+			const previewData = {
+				chapterTitle: chapter.title,
+				fullContent: fullContent,
+				currentOffset: currentOffset,
+				totalLength: fullContent.length,
+				initialScrollPercentage: this._lastScrollPercentage
+			};
+
+			// 如果悬浮窗已存在，直接更新内容
+			if (this._webviewPanel) {
+				this._updateChapterPreview(previewData);
+				return;
+			}
+
+			// 创建新的章节预览窗
+			this._webviewPanel = vscode.window.createWebviewPanel(
+				'thiefReaderChapterPreview',
+				`${chapter.title} - 章节预览`,
+				{
+					viewColumn: vscode.ViewColumn.Beside,
+					preserveFocus: true
+				},
+				{
+					enableScripts: true,
+					retainContextWhenHidden: true,
+					localResourceRoots: []
+				}
+			);
+
+			// 设置WebView内容
+			this._webviewPanel.webview.html = this._generateChapterPreviewHtml();
+			
+			// 设置消息处理
+			this._setupChapterPreviewMessageHandling();
+			
+			// 设置面板关闭事件
+			this._webviewPanel.onDidDispose(() => {
+				this._onChapterPreviewDisposed();
+			});
+
+			// 更新内容并滚动到当前位置
+			this._updateChapterPreview(previewData);
+			this._isVisible = true;
+
+			console.log('章节预览窗已显示:', chapter.title);
+
+		} catch (error) {
+			console.error('显示章节预览窗失败:', error);
+			vscode.window.showErrorMessage('显示章节预览失败: ' + error.message);
+		}
+	}
+
+	/**
+	 * 在指定位置显示悬浮窗（保留旧方法用于兼容）
+	 */
+	async showAt(content) {
+		// 重定向到新的章节预览方法
+		return this.showChapterPreview();
+	}
+
+	/**
+	 * 隐藏悬浮窗
+	 */
+	hide() {
+		if (this._webviewPanel) {
+			// 使用最后记录的滚动位置进行同步（避免向disposed WebView发送消息）
+			this._syncLastScrollPositionToStatusBar();
+			
+			// 关闭面板
+			this._webviewPanel.dispose();
+			this._webviewPanel = null;
+			this._isVisible = false;
+			this._currentContent = null;
+
+			console.log('章节预览窗已隐藏');
+		}
+	}
+
+	/**
+	 * 切换章节预览显示状态
+	 */
+	toggleChapterPreview() {
+		if (this._isVisible) {
+			this.hide();
+		} else {
+			this.showChapterPreview();
+		}
+	}
+
+	/**
+	 * 计算滚动百分比
+	 */
+	_calculateScrollPercentage(currentOffset, fullContent) {
+		if (!fullContent || fullContent.length === 0) {
+			return 0;
+		}
+		return Math.min(currentOffset / fullContent.length, 1);
+	}
+
+	/**
+	 * 更新章节预览内容
+	 */
+	_updateChapterPreview(previewData) {
+		if (!this._webviewPanel || !previewData) {
+			return;
+		}
+
+		// 防抖更新
+		if (this._debounceTimer) {
+			clearTimeout(this._debounceTimer);
+		}
+
+		this._debounceTimer = setTimeout(() => {
+			// 发送内容更新消息，包含保存的透明度
+			this._webviewPanel.webview.postMessage({
+				type: 'updateChapterPreview',
+				data: previewData,
+				popupTextOpacity: this._popupTextOpacity
+			});
+		}, 50); // 50ms防抖
+	}
+
+	/**
+	 * 同步滚动位置到状态栏（安全版本，检查WebView状态）
+	 */
+	async _syncScrollPositionToStatusBar() {
+		if (!this._webviewPanel || !this._isVisible) return;
+
+		try {
+			// 检查WebView是否还有效
+			if (this._webviewPanel.webview) {
+				// 请求WebView返回当前滚动位置
+				this._webviewPanel.webview.postMessage({
+					type: 'requestScrollPosition'
+				});
+			} else {
+				// WebView无效，使用最后记录的位置
+				this._syncLastScrollPositionToStatusBar();
+			}
+		} catch (error) {
+			console.warn('同步滚动位置失败，使用备用方案:', error.message);
+			// 发生错误时使用最后记录的滚动位置
+			this._syncLastScrollPositionToStatusBar();
+		}
+	}
+
+	/**
+	 * 使用最后记录的滚动位置同步到状态栏
+	 */
+	_syncLastScrollPositionToStatusBar() {
+		try {
+			const currentFile = this._readerProvider._currentFile;
+			if (!currentFile || this._readerProvider._currentChapter === null) return;
+
+			const chapter = currentFile.chapters[this._readerProvider._currentChapter];
+			if (!chapter) return;
+
+			const fullContent = getChapterContentAsString(chapter);
+			
+			// 优先使用字符偏移量，如果没有则使用百分比计算
+			let newTextOffset = this._lastCharOffset;
+			
+			// 如果字符偏移量为0但百分比不为0，说明可能是旧版本数据，使用百分比计算
+			if (newTextOffset === 0 && this._lastScrollPercentage > 0) {
+				newTextOffset = Math.floor(this._lastScrollPercentage * fullContent.length);
+				console.log(`使用百分比计算偏移量: ${this._lastScrollPercentage.toFixed(4)} -> ${newTextOffset}`);
+			} else {
+				console.log(`使用字符偏移量: ${newTextOffset}`);
+			}
+			
+			// 确保偏移量在有效范围内
+			newTextOffset = Math.max(0, Math.min(newTextOffset, fullContent.length - 1));
+			
+			// 更新状态栏位置
+			this._readerProvider._scrollOffset = newTextOffset;
+			
+			// 立即更新状态栏显示（传入章节参数）
+			this._readerProvider._displayChapterText(chapter);
+			
+			// 保存当前状态（包括章节位置）
+			this._readerProvider._saveChapterPosition(this._readerProvider._currentChapter, newTextOffset);
+			this._readerProvider._saveCurrentState();
+			
+			// 强制刷新状态栏显示（确保图标同步）
+			setTimeout(() => {
+				this._readerProvider._displayChapterText(chapter);
+			}, 50);
+			
+			console.log(`✅ 弹窗滚动位置已同步到状态栏: 字符偏移量 ${newTextOffset}`);
+		} catch (error) {
+			console.error('同步滚动位置失败:', error);
+		}
+	}
+
+	/**
+	 * 检查悬浮窗是否可见
+	 */
+	isVisible() {
+		return this._isVisible && this._webviewPanel !== null;
+	}
+
+	/**
+	 * 从配置中加载弹窗文字透明度
+	 */
+	_loadPopupOpacity() {
+		const config = vscode.workspace.getConfiguration('thief-reader');
+		const savedOpacity = config.get('popupTextOpacity');
+		if (savedOpacity !== undefined) {
+			this._popupTextOpacity = savedOpacity;
+		}
+	}
+
+	/**
+	 * 保存弹窗文字透明度到配置
+	 */
+	_savePopupOpacity(value) {
+		this._popupTextOpacity = Math.max(10, Math.min(100, value));
+		vscode.workspace.getConfiguration('thief-reader').update('popupTextOpacity', this._popupTextOpacity, true);
+	}
+
+	/**
+	 * 更新悬浮窗内容
+	 */
+	_updateContent(content) {
+		if (!this._webviewPanel || !content) {
+			return;
+		}
+
+		// 防抖更新
+		if (this._debounceTimer) {
+			clearTimeout(this._debounceTimer);
+		}
+
+		this._debounceTimer = setTimeout(() => {
+			this._currentContent = content;
+			
+			// 发送内容更新消息
+			this._webviewPanel.webview.postMessage({
+				type: 'updateContent',
+				data: content
+			});
+		}, 50); // 50ms防抖
+	}
+
+	/**
+	 * 设置章节预览消息处理
+	 */
+	_setupChapterPreviewMessageHandling() {
+		this._webviewPanel.webview.onDidReceiveMessage(message => {
+			switch (message.type) {
+				case 'scrollPositionChanged':
+					this._handleScrollPositionChanged(message.scrollTop, message.scrollPercentage, message.charOffset);
+					break;
+				
+				case 'popupOpacityChanged':
+					this._savePopupOpacity(message.value);
+					break;
+				
+				case 'hide':
+					this.hide();
+					break;
+				
+				case 'ready':
+					// WebView准备就绪
+					console.log('章节预览WebView已准备就绪');
+					break;
+
+				case 'scrollPositionResponse':
+					// 处理滚动位置响应
+					this._handleScrollPositionResponse(message.scrollTop, message.scrollPercentage, message.charOffset);
+					break;
+			}
+		});
+	}
+
+	/**
+	 * 设置消息处理（保留旧方法用于兼容）
+	 */
+	_setupMessageHandling() {
+		return this._setupChapterPreviewMessageHandling();
+	}
+
+	/**
+	 * 处理滚动位置变化
+	 */
+	_handleScrollPositionChanged(scrollTop, scrollPercentage, charOffset) {
+		// 实时更新但不立即同步到状态栏（避免频繁更新）
+		this._lastScrollTop = scrollTop;
+		this._lastScrollPercentage = scrollPercentage;
+		this._lastCharOffset = charOffset || 0;
+	}
+
+	/**
+	 * 处理滚动位置响应（用于同步到状态栏）
+	 */
+	_handleScrollPositionResponse(scrollTop, scrollPercentage, charOffset) {
+		try {
+			const currentFile = this._readerProvider._currentFile;
+			if (!currentFile || this._readerProvider._currentChapter === null) return;
+
+			const chapter = currentFile.chapters[this._readerProvider._currentChapter];
+			if (!chapter) return;
+
+			const fullContent = getChapterContentAsString(chapter);
+			
+			// 优先使用字符偏移量，如果没有则使用百分比计算
+			let newTextOffset = charOffset || Math.floor(scrollPercentage * fullContent.length);
+			
+			// 确保偏移量在有效范围内
+			newTextOffset = Math.max(0, Math.min(newTextOffset, fullContent.length - 1));
+			
+			// 更新状态栏位置
+			this._readerProvider._scrollOffset = newTextOffset;
+			
+			// 立即更新状态栏显示（传入章节参数）
+			this._readerProvider._displayChapterText(chapter);
+			
+			// 保存当前状态
+			this._readerProvider._saveCurrentState();
+			
+			console.log(`滚动位置已同步: 字符偏移量 ${newTextOffset}`);
+		} catch (error) {
+			console.error('处理滚动位置响应失败:', error);
+		}
+	}
+
+	/**
+	 * 处理滚轮滚动事件
+	 */
+	_handleWheelScroll(deltaY, ctrlKey = false) {
+		const newContent = this._scrollHandler.handleWheelEvent(deltaY, ctrlKey);
+		if (newContent) {
+			this._updateContent(newContent);
+		}
+	}
+
+	/**
+	 * 章节预览面板关闭事件处理
+	 */
+	_onChapterPreviewDisposed() {
+		// 使用最后记录的滚动位置进行同步（WebView已经disposed，无法发送消息）
+		this._syncLastScrollPositionToStatusBar();
+		
+		this._webviewPanel = null;
+		this._isVisible = false;
+		this._currentContent = null;
+		
+		// 清理滚动位置记录
+		this._lastScrollTop = 0;
+		this._lastScrollPercentage = 0;
+		this._lastCharOffset = 0;
+		
+		console.log('章节预览面板已关闭');
+	}
+
+	/**
+	 * 面板关闭事件处理（保留旧方法用于兼容）
+	 */
+	_onPanelDisposed() {
+		return this._onChapterPreviewDisposed();
+	}
+
+	/**
+	 * 生成章节预览的HTML内容
+	 */
+	_generateChapterPreviewHtml() {
+		return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>章节预览</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family, 'Microsoft YaHei', sans-serif);
+            font-size: 16px;
+            line-height: 1.8;
+            color: var(--vscode-foreground);
+            background: var(--vscode-editor-background);
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+		.header {
+			flex-shrink: 0;
+			padding: 16px 20px 8px 20px;
+			background: var(--vscode-titleBar-activeBackground);
+			border-bottom: 1px solid var(--vscode-panel-border);
+			min-height: 60px;
+		}
+		
+		.header-top {
+			display: flex;
+			justify-content: space-between;
+			align-items: flex-start;
+			margin-bottom: 8px;
+		}
+		
+		.opacity-control {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			font-size: 12px;
+			color: var(--vscode-titleBar-activeForeground);
+			opacity: 0.8;
+		}
+		
+		.opacity-control label {
+			margin: 0;
+		}
+		
+		.popup-opacity-slider {
+			width: 120px;
+			height: 4px;
+			border-radius: 2px;
+			background: var(--vscode-scrollbarSlider-background);
+			outline: none;
+			cursor: pointer;
+			border: none;
+		}
+		
+		.popup-opacity-slider:focus {
+			outline: none !important;
+			border: none !important;
+			box-shadow: none !important;
+		}
+		
+		.popup-opacity-slider::-webkit-slider-thumb {
+			-webkit-appearance: none;
+			width: 10px;
+			height: 10px;
+			border-radius: 50%;
+			background: var(--vscode-titleBar-activeForeground);
+			cursor: pointer;
+			outline: none;
+			border: none;
+		}
+		
+		.popup-opacity-slider::-webkit-slider-thumb:focus {
+			outline: none !important;
+			border: none !important;
+			box-shadow: none !important;
+		}
+		
+		.popup-opacity-slider::-moz-range-thumb {
+			width: 10px;
+			height: 10px;
+			border-radius: 50%;
+			background: var(--vscode-titleBar-activeForeground);
+			cursor: pointer;
+			border: none;
+			outline: none;
+		}
+		
+		.popup-opacity-slider::-moz-range-thumb:focus {
+			outline: none !important;
+			border: none !important;
+			box-shadow: none !important;
+		}
+        
+		.chapter-title {
+			font-weight: bold;
+			font-size: 16px;
+			color: var(--vscode-titleBar-activeForeground);
+			word-wrap: break-word;
+			word-break: break-all;
+			line-height: 1.4;
+			max-width: calc(100% - 40px);
+		}
+        
+		.close-button {
+			background: none;
+			border: none;
+			color: var(--vscode-titleBar-activeForeground);
+			font-size: 16px;
+			cursor: pointer;
+			padding: 4px 8px;
+			border-radius: 4px;
+			flex-shrink: 0;
+			margin-left: 10px;
+			align-self: flex-start;
+		}
+        
+        .close-button:hover {
+            background: var(--vscode-titleBar-inactiveBackground);
+        }
+        
+        .content-wrapper {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+            position: relative;
+        }
+        
+        .position-marker {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--vscode-progressBar-background);
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .position-marker.visible {
+            opacity: 1;
+        }
+        
+        .content {
+            padding: 24px 32px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 2.0;
+            letter-spacing: 0.5px;
+        }
+        
+        .content::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .footer {
+            flex-shrink: 0;
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            padding: 8px 20px;
+            text-align: center;
+            background: var(--vscode-statusBar-background);
+            border-top: 1px solid var(--vscode-panel-border);
+        }
+        
+        .loading {
+            text-align: center;
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+            padding: 40px 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-top">
+                <div class="chapter-title" id="chapterTitle">
+                    正在加载章节...
+                </div>
+                <button class="close-button" onclick="closePreview()" title="关闭预览">
+                    ✕
+                </button>
+            </div>
+            <div class="opacity-control">
+                <label for="popup-opacity-slider">文字透明度: <span id="popup-opacity-value">100</span>%</label>
+                <input type="range" id="popup-opacity-slider" class="popup-opacity-slider" min="10" max="100" value="100" step="5">
+            </div>
+        </div>
+        
+        <div class="content-wrapper" id="contentWrapper">
+            <div class="position-marker" id="positionMarker"></div>
+            <div class="content" id="content">
+                <div class="loading">正在加载章节内容...</div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            📖 滚动阅读整章内容 • Shift+Space 切换显示 • ESC 关闭
+        </div>
+    </div>
+    
+    <script>
+        let currentScrollPercentage = 0;
+        let isScrolling = false;
+        let scrollTimeout = null;
+        let popupTextOpacity = 100; // 弹窗文字透明度
+        
+        // 获取VSCode API
+        const vscode = acquireVsCodeApi();
+        
+        // 关闭预览
+        function closePreview() {
+            vscode.postMessage({ type: 'hide' });
+        }
+        
+        // 应用文字透明度
+        function applyTextOpacity(opacity) {
+            const contentElement = document.getElementById('content');
+            if (contentElement) {
+                contentElement.style.opacity = (opacity / 100).toFixed(2);
+            }
+        }
+        
+        // 监听透明度滑块
+        const opacitySlider = document.getElementById('popup-opacity-slider');
+        if (opacitySlider) {
+            opacitySlider.addEventListener('input', function(e) {
+                const value = parseInt(e.target.value);
+                popupTextOpacity = value;
+                document.getElementById('popup-opacity-value').textContent = value;
+                applyTextOpacity(value);
+                
+                // 发送消息保存透明度
+                vscode.postMessage({
+                    type: 'popupOpacityChanged',
+                    value: value
+                });
+            });
+        }
+        
+		// 监听滚动事件
+		const contentWrapper = document.getElementById('contentWrapper');
+		let fullContentText = '';
+		
+		// 计算可视区域第一个字符的偏移量
+		function getCharOffsetAtTop() {
+			const contentElement = document.getElementById('content');
+			if (!contentElement || !fullContentText) return 0;
+			
+			try {
+				// 获取content元素的位置
+				const contentRect = contentElement.getBoundingClientRect();
+				const wrapperRect = contentWrapper.getBoundingClientRect();
+				
+				// 计算可视区域顶部相对于content的位置
+				const topY = wrapperRect.top - contentRect.top;
+				
+				// 如果在顶部之前，返回0
+				if (topY <= 0) return 0;
+				
+				// 尝试使用document.caretRangeFromPoint获取字符位置
+				const range = document.caretRangeFromPoint(contentRect.left + 10, wrapperRect.top + 5);
+				if (range && range.startContainer) {
+					// 遍历文本节点计算偏移量
+					let charOffset = 0;
+					const walker = document.createTreeWalker(
+						contentElement,
+						NodeFilter.SHOW_TEXT,
+						null,
+						false
+					);
+					
+					let currentNode;
+					while (currentNode = walker.nextNode()) {
+						if (currentNode === range.startContainer) {
+							charOffset += range.startOffset;
+							return charOffset;
+						}
+						charOffset += currentNode.textContent.length;
+					}
+				}
+				
+				// 如果上述方法失败，使用百分比估算
+				const scrollPercentage = contentWrapper.scrollTop / (contentWrapper.scrollHeight - contentWrapper.clientHeight);
+				return Math.floor(scrollPercentage * fullContentText.length);
+			} catch (e) {
+				// 出错时使用百分比估算
+				const scrollPercentage = contentWrapper.scrollTop / (contentWrapper.scrollHeight - contentWrapper.clientHeight);
+				return Math.floor(scrollPercentage * fullContentText.length);
+			}
+		}
+		
+		contentWrapper.addEventListener('scroll', function(event) {
+			const scrollTop = contentWrapper.scrollTop;
+			const scrollHeight = contentWrapper.scrollHeight - contentWrapper.clientHeight;
+			const scrollPercentage = scrollHeight > 0 ? scrollTop / scrollHeight : 0;
+			
+			currentScrollPercentage = scrollPercentage;
+			isScrolling = true;
+			
+			// 使用精确方法计算字符偏移量
+			const charOffset = getCharOffsetAtTop();
+			
+			// 调试日志
+			if (scrollTop % 100 < 50) {
+				console.log('Scroll:', scrollTop.toFixed(0) + 'px,', (scrollPercentage * 100).toFixed(1) + '%, charOffset:', charOffset);
+			}
+			
+			// 显示位置标记
+			const marker = document.getElementById('positionMarker');
+			marker.style.top = scrollTop + 'px';
+			marker.classList.add('visible');
+			
+			// 发送滚动位置变化，包含精确的字符偏移量
+			vscode.postMessage({
+				type: 'scrollPositionChanged',
+				scrollTop: scrollTop,
+				scrollPercentage: scrollPercentage,
+				charOffset: charOffset
+			});
+			
+			// 滚动停止后隐藏标记
+			if (scrollTimeout) {
+				clearTimeout(scrollTimeout);
+			}
+			scrollTimeout = setTimeout(() => {
+				isScrolling = false;
+				marker.classList.remove('visible');
+			}, 500);
+		});
+        
+        // 监听键盘事件
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closePreview();
+            }
+        });
+        
+        // 监听来自扩展的消息
+        window.addEventListener('message', function(event) {
+            const message = event.data;
+            
+            switch (message.type) {
+                case 'updateChapterPreview':
+                    updateChapterPreview(message.data);
+                    // 应用保存的透明度
+                    if (message.popupTextOpacity !== undefined) {
+                        popupTextOpacity = message.popupTextOpacity;
+                        const slider = document.getElementById('popup-opacity-slider');
+                        const valueSpan = document.getElementById('popup-opacity-value');
+                        if (slider && valueSpan) {
+                            slider.value = message.popupTextOpacity;
+                            valueSpan.textContent = message.popupTextOpacity;
+                        }
+                        applyTextOpacity(message.popupTextOpacity);
+                    }
+                    break;
+                    
+                case 'requestScrollPosition':
+                    // 响应滚动位置请求，使用精确计算方法
+                    vscode.postMessage({
+                        type: 'scrollPositionResponse',
+                        scrollTop: contentWrapper.scrollTop,
+                        scrollPercentage: currentScrollPercentage,
+                        charOffset: getCharOffsetAtTop()
+                    });
+                    break;
+            }
+        });
+        
+		// 更新章节预览内容
+		function updateChapterPreview(data) {
+			if (!data) return;
+			
+			// 更新标题
+			document.getElementById('chapterTitle').textContent = data.chapterTitle;
+            
+            // 保存完整内容文本供滚动计算使用
+            fullContentText = data.fullContent || '';
+            
+            // 更新内容并插入阅读位置标记
+            const contentElement = document.getElementById('content');
+            
+            if (data.currentOffset !== undefined && data.fullContent) {
+                // 在当前阅读位置插入标记
+                const beforeText = data.fullContent.substring(0, data.currentOffset);
+                const afterText = data.fullContent.substring(data.currentOffset);
+                
+                // 创建带标记的HTML内容
+                contentElement.innerHTML = '';
+                
+                // 添加标记前的文本
+                if (beforeText) {
+                    const beforeSpan = document.createElement('span');
+                    beforeSpan.textContent = beforeText;
+                    contentElement.appendChild(beforeSpan);
+                }
+                
+                // 添加当前阅读位置标记
+                const markerSpan = document.createElement('span');
+                markerSpan.id = 'currentReadingPosition';
+                markerSpan.style.backgroundColor = 'var(--vscode-editor-findMatchHighlightBackground)';
+                markerSpan.style.color = 'var(--vscode-editor-foreground)';
+                markerSpan.style.padding = '2px 4px';
+                markerSpan.style.borderRadius = '3px';
+                markerSpan.style.boxShadow = '0 0 0 1px var(--vscode-editor-findMatchBorder)';
+                
+                // 获取状态栏显示长度的文字作为高亮内容
+                const displayLength = 80;
+                const highlightText = afterText.substring(0, Math.min(displayLength, afterText.length));
+                markerSpan.textContent = highlightText;
+                contentElement.appendChild(markerSpan);
+                
+                // 添加标记后的文本
+                const remainingText = afterText.substring(highlightText.length);
+                if (remainingText) {
+                    const afterSpan = document.createElement('span');
+                    afterSpan.textContent = remainingText;
+                    contentElement.appendChild(afterSpan);
+                }
+                
+                // 滚动到当前阅读位置
+                setTimeout(() => {
+                    const marker = document.getElementById('currentReadingPosition');
+                    if (marker) {
+                        marker.scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'start',
+                            inline: 'nearest' 
+                        });
+                        
+                        // 滚动完成后，手动设置当前的字符偏移量
+                        setTimeout(() => {
+                            const scrollTop = contentWrapper.scrollTop;
+                            const scrollHeight = contentWrapper.scrollHeight - contentWrapper.clientHeight;
+                            const scrollPercentage = scrollHeight > 0 ? scrollTop / scrollHeight : 0;
+                            
+                            currentScrollPercentage = scrollPercentage;
+                            
+                            // 使用精确计算方法获取字符偏移量
+                            // 因为滚动后DOM已稳定，可以准确计算
+                            const calculatedOffset = getCharOffsetAtTop();
+                            
+                            // 优先使用计算值，如果为0则使用初始值
+                            const finalOffset = calculatedOffset > 0 ? calculatedOffset : data.currentOffset;
+                            
+                            vscode.postMessage({
+                                type: 'scrollPositionChanged',
+                                scrollTop: scrollTop,
+                                scrollPercentage: scrollPercentage,
+                                charOffset: finalOffset
+                            });
+                            
+                            console.log('Initial position synced:', finalOffset);
+                        }, 600);
+                        
+                        // 显示位置标记线
+                        const positionMarker = document.getElementById('positionMarker');
+                        const markerRect = marker.getBoundingClientRect();
+                        const wrapperRect = contentWrapper.getBoundingClientRect();
+                        positionMarker.style.top = (markerRect.top - wrapperRect.top + contentWrapper.scrollTop) + 'px';
+                        positionMarker.classList.add('visible');
+                        
+                        setTimeout(() => {
+                            positionMarker.classList.remove('visible');
+                        }, 2000);
+                    }
+                }, 100);
+            } else {
+                // 如果没有偏移量，直接显示内容
+                contentElement.textContent = data.fullContent;
+            }
+        }
+        
+        // 通知扩展WebView已准备就绪
+        vscode.postMessage({ type: 'ready' });
+    </script>
+</body>
+</html>`;
+	}
+
+	/**
+	 * 生成WebView的HTML内容（保留旧方法用于兼容）
+	 */
+	_generateHtml() {
+		return `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>阅读预览</title>
+    <style>
+        body {
+            font-family: var(--vscode-font-family, 'Microsoft YaHei', sans-serif);
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--vscode-foreground);
+            background: var(--vscode-editor-background);
+            margin: 0;
+            padding: 16px;
+            overflow: hidden;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 100%;
+            height: calc(100vh - 32px);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: var(--vscode-textLink-foreground);
+            border-bottom: 1px solid var(--vscode-panel-border);
+            padding-bottom: 8px;
+            flex-shrink: 0;
+        }
+        
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 8px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .content::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .content::-webkit-scrollbar-track {
+            background: var(--vscode-scrollbarSlider-background);
+            border-radius: 4px;
+        }
+        
+        .content::-webkit-scrollbar-thumb {
+            background: var(--vscode-scrollbarSlider-hoverBackground);
+            border-radius: 4px;
+        }
+        
+        .content::-webkit-scrollbar-thumb:hover {
+            background: var(--vscode-scrollbarSlider-activeBackground);
+        }
+        
+        .footer {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            margin-top: 12px;
+            text-align: center;
+            flex-shrink: 0;
+            border-top: 1px solid var(--vscode-panel-border);
+            padding-top: 8px;
+        }
+        
+        .loading {
+            text-align: center;
+            color: var(--vscode-descriptionForeground);
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header" id="header">
+            <div class="loading">正在加载...</div>
+        </div>
+        <div class="content" id="content">
+            <div class="loading">请等待内容加载...</div>
+        </div>
+        <div class="footer">
+            🖱️ 滚轮滚动文字 • Ctrl+滚轮快速滚动 • ESC隐藏
+        </div>
+    </div>
+    
+    <script>
+        // 监听滚轮事件
+        document.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            
+            // 发送滚轮事件到扩展
+            vscode.postMessage({
+                type: 'wheelScroll',
+                deltaY: event.deltaY,
+                ctrlKey: event.ctrlKey
+            });
+        });
+        
+        // 监听键盘事件
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                vscode.postMessage({
+                    type: 'hide'
+                });
+            }
+        });
+        
+        // 监听来自扩展的消息
+        window.addEventListener('message', event => {
+            const message = event.data;
+            
+            switch (message.type) {
+                case 'updateContent':
+                    updateContent(message.data);
+                    break;
+            }
+        });
+        
+        // 更新内容显示
+        function updateContent(data) {
+            if (!data) return;
+            
+            const headerElement = document.getElementById('header');
+            const contentElement = document.getElementById('content');
+            
+            // 更新标题
+            headerElement.textContent = \`\${data.chapterTitle} [\${data.position}]\`;
+            
+            // 更新内容
+            contentElement.textContent = data.text;
+            
+            // 滚动到顶部
+            contentElement.scrollTop = 0;
+        }
+        
+        // 获取VSCode API
+        const vscode = acquireVsCodeApi();
+        
+        // 通知扩展WebView已准备就绪
+        vscode.postMessage({ type: 'ready' });
+    </script>
+</body>
+</html>`;
+	}
+}
+
+/**
+ * 鼠标事件监听器和悬停提供器 - 检测Alt+悬停并显示预览
+ */
+class MouseEventListener {
+	constructor(altKeyManager, floatingWindowManager, readerProvider, scrollHandler) {
+		this._altKeyManager = altKeyManager;
+		this._floatingWindowManager = floatingWindowManager;
+		this._readerProvider = readerProvider;
+		this._scrollHandler = scrollHandler;
+		this._disposables = [];
+		this._isHoverActive = false;
+		this._showTimer = null;
+		this._hideTimer = null;
+		this._checkInterval = null;
+	}
+
+	/**
+	 * 启动监听
+	 */
+	startListening() {
+		// 监听编辑器光标位置变化（检测鼠标是否在编辑器中）
+		const selectionChangeDisposable = vscode.window.onDidChangeTextEditorSelection((event) => {
+			this._onEditorSelectionChange(event);
+		});
+		this._disposables.push(selectionChangeDisposable);
+
+		// 监听活动编辑器变化
+		const editorChangeDisposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
+			this._onEditorChange(editor);
+		});
+		this._disposables.push(editorChangeDisposable);
+
+		// 监听Alt键状态变化
+		this._altKeyManager.addListener(this._onAltKeyChanged.bind(this));
+
+		// 定期检查编辑器状态（作为补充）
+		this._startPeriodicCheck();
+
+		console.log('编辑器事件监听器已启动');
+	}
+
+	/**
+	 * 编辑器选择变化处理（检测鼠标活动）
+	 */
+	_onEditorSelectionChange(event) {
+		// 检查是否启用悬停功能
+		if (this._shouldShowFloatingWindow()) {
+			this._showFloatingWindowDelayed();
+		} else {
+			this._hideFloatingWindowDelayed();
+		}
+	}
+
+	/**
+	 * 编辑器变化处理
+	 */
+	_onEditorChange(editor) {
+		if (!editor) {
+			// 没有活动编辑器，隐藏悬浮窗
+			this._hideFloatingWindowDelayed();
+		} else {
+			// 有活动编辑器，检查是否应该显示
+			if (this._shouldShowFloatingWindow()) {
+				this._showFloatingWindowDelayed();
+			}
+		}
+	}
+
+	/**
+	 * 定期检查编辑器状态
+	 */
+	_startPeriodicCheck() {
+		// 每500ms检查一次状态
+		this._checkInterval = setInterval(() => {
+			if (this._shouldShowFloatingWindow()) {
+				if (!this._isHoverActive) {
+					this._showFloatingWindowDelayed();
+				}
+			} else {
+				if (this._isHoverActive) {
+					this._hideFloatingWindowDelayed();
+				}
+			}
+		}, 500);
+	}
+
+	/**
+	 * 检查是否应该显示悬浮窗
+	 */
+	_shouldShowFloatingWindow() {
+		// 检查Alt键状态（真实的或强制启用的）
+		if (!this._altKeyManager.isAltPressed() && !this._altKeyManager._forceEnabled) {
+			return false;
+		}
+
+		// 检查是否有活动编辑器
+		const editor = vscode.window.activeTextEditor;
+		if (!editor) {
+			return false;
+		}
+
+		// 检查是否有当前阅读内容
+		if (!this._readerProvider._currentFile || this._readerProvider._currentChapter === null) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Alt键状态变化处理
+	 */
+	_onAltKeyChanged(isPressed) {
+		console.log(`Alt键状态变化: ${isPressed ? '按下' : '释放'}`);
+		
+		if (isPressed) {
+			// Alt键按下，检查是否应该显示悬浮窗
+			if (this._shouldShowFloatingWindow()) {
+				this._showFloatingWindowDelayed();
+			}
+		} else {
+			// Alt键释放，隐藏悬浮窗
+			this._hideFloatingWindowDelayed();
+		}
+	}
+
+	/**
+	 * 延迟显示悬浮窗
+	 */
+	_showFloatingWindowDelayed() {
+		// 清除隐藏定时器
+		if (this._hideTimer) {
+			clearTimeout(this._hideTimer);
+			this._hideTimer = null;
+		}
+
+		// 如果已经在显示，不需要重新显示
+		if (this._isHoverActive || this._floatingWindowManager.isVisible()) {
+			return;
+		}
+
+		// 延迟显示（避免频繁触发）
+		if (this._showTimer) {
+			clearTimeout(this._showTimer);
+		}
+
+		this._showTimer = setTimeout(() => {
+			this._showFloatingWindow();
+		}, 200); // 200ms延迟
+	}
+
+	/**
+	 * 延迟隐藏悬浮窗
+	 */
+	_hideFloatingWindowDelayed() {
+		// 清除显示定时器
+		if (this._showTimer) {
+			clearTimeout(this._showTimer);
+			this._showTimer = null;
+		}
+
+		// 延迟隐藏（给用户时间移动到悬浮窗）
+		if (this._hideTimer) {
+			clearTimeout(this._hideTimer);
+		}
+
+		this._hideTimer = setTimeout(() => {
+			this._hideFloatingWindow();
+		}, 300); // 300ms延迟
+	}
+
+	/**
+	 * 显示悬浮窗
+	 */
+	async _showFloatingWindow() {
+		try {
+			if (this._isHoverActive) return;
+
+			// 获取当前阅读内容
+			const content = this._getCurrentReaderContent();
+			if (!content) return;
+
+			// 初始化滚动处理器
+			this._scrollHandler.initialize();
+
+			// 显示悬浮窗
+			await this._floatingWindowManager.showAt(content);
+			this._isHoverActive = true;
+
+			console.log('悬浮窗已显示:', content.chapterTitle);
+
+		} catch (error) {
+			console.error('显示悬浮窗失败:', error);
+		}
+	}
+
+	/**
+	 * 隐藏悬浮窗
+	 */
+	_hideFloatingWindow() {
+		if (this._isHoverActive) {
+			this._floatingWindowManager.hide();
+			this._scrollHandler.reset();
+			this._isHoverActive = false;
+		}
+	}
+
+	/**
+	 * 获取当前阅读内容
+	 */
+	_getCurrentReaderContent() {
+		const currentFile = this._readerProvider._currentFile;
+		if (!currentFile || !currentFile.chapters || this._readerProvider._currentChapter === null) {
+			return null;
+		}
+
+		const chapter = currentFile.chapters[this._readerProvider._currentChapter];
+		if (!chapter) return null;
+
+		const scrollOffset = this._readerProvider._scrollOffset;
+		const displayLength = 300; // 显示300个字符
+
+		// 使用辅助函数处理内容
+		const fullContent = getChapterContentAsString(chapter);
+		if (!fullContent) {
+			console.error('Empty or invalid chapter content in getCurrentReaderContent');
+			return null;
+		}
+
+		// 获取文字内容
+		const text = fullContent.substring(scrollOffset, scrollOffset + displayLength);
+		const position = `${scrollOffset}-${scrollOffset + text.length}/${fullContent.length}`;
+
+		return {
+			text: text,
+			chapterTitle: chapter.title,
+			position: position,
+			scrollPosition: scrollOffset,
+			maxPosition: fullContent.length,
+			hasMore: scrollOffset + displayLength < fullContent.length
+		};
+	}
+
+	/**
+	 * 手动触发Alt键状态（用于测试或命令触发）
+	 */
+	triggerAltKey(pressed) {
+		this._altKeyManager.setAltPressed(pressed);
+	}
+
+	/**
+	 * 清理资源
+	 */
+	dispose() {
+		// 清理定时器
+		if (this._showTimer) {
+			clearTimeout(this._showTimer);
+			this._showTimer = null;
+		}
+		if (this._hideTimer) {
+			clearTimeout(this._hideTimer);
+			this._hideTimer = null;
+		}
+		if (this._checkInterval) {
+			clearInterval(this._checkInterval);
+			this._checkInterval = null;
+		}
+
+		// 隐藏悬浮窗
+		this._hideFloatingWindow();
+
+		// 移除Alt键监听器
+		this._altKeyManager.removeListener(this._onAltKeyChanged.bind(this));
+
+		// 清理所有disposables
+		this._disposables.forEach(disposable => disposable.dispose());
+		this._disposables = [];
+	}
+}
+
+/**
  * 存储管理器类 - 负责数据持久化
  */
 class StorageManager {
@@ -114,8 +1719,16 @@ class ThiefReaderWebviewProvider {
 		this._storageManager = new StorageManager(context); // 存储管理器
 		this._saveDebounceTimer = null; // 防抖定时器
 		this._isRestoring = false; // 是否正在恢复数据
+		
+		// 章节预览功能组件
+		this._altKeyManager = new AltKeyManager(); // Alt键状态管理器（保留用于兼容性）
+		this._scrollHandler = new ScrollWheelHandler(this); // 滚轮滚动处理器（保留用于兼容性）
+		this._floatingWindowManager = new FloatingWindowManager(context, this, this._scrollHandler); // 悬浮窗管理器
+		this._mouseEventListener = new MouseEventListener(this._altKeyManager, this._floatingWindowManager, this, this._scrollHandler); // 鼠标事件监听器（保留用于兼容性）
+		
 		this._loadOpacity(); // 从配置中加载透明度
 		this._initStatusBar();
+		// 移除旧的悬停功能初始化，新功能直接集成到状态栏按钮中
 		this._restoreData(); // 恢复数据
 	}
 
@@ -124,10 +1737,26 @@ class ThiefReaderWebviewProvider {
 	 */
 	_initStatusBar() {
 		this._statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-		this._statusBarItem.text = "reader: 准备就绪";
-		this._statusBarItem.tooltip = '使用 Alt + 方向键滚动文字';
+		this._statusBarItem.text = "reader: 准备就绪 📖";
+		this._statusBarItem.tooltip = '点击显示/隐藏章节预览 • 使用 Alt + 方向键滚动文字';
+		this._statusBarItem.command = 'thief-reader.toggleChapterPreview'; // 设置点击命令
 		this._statusBarItem.show();
 		this._context.subscriptions.push(this._statusBarItem);
+	}
+
+	/**
+	 * 切换章节预览
+	 */
+	toggleChapterPreview() {
+		this._floatingWindowManager.toggleChapterPreview();
+	}
+
+	/**
+	 * 初始化悬停功能（已废弃，保留用于兼容性）
+	 */
+	_initHoverFeature() {
+		// 功能已整合到状态栏按钮和章节预览中
+		console.log('章节预览功能已就绪');
 	}
 
 	/**
@@ -143,6 +1772,10 @@ class ThiefReaderWebviewProvider {
 			// 第一次安装或没有保存的数据
 			if (!savedFiles || savedFiles.length === 0) {
 				this._statusBarItem.text = "reader: 准备就绪";
+				// 确保弹窗在首次启动时是关闭的
+				if (this._floatingWindowManager.isVisible()) {
+					this._floatingWindowManager.hide();
+				}
 				this._isRestoring = false;
 				return;
 			}
@@ -272,11 +1905,20 @@ class ThiefReaderWebviewProvider {
 				this._refreshView();
 			}
 			
+			// 确保弹窗在启动时是关闭的
+			if (this._floatingWindowManager.isVisible()) {
+				this._floatingWindowManager.hide();
+			}
+			
 			this._isRestoring = false;
 		} catch (error) {
 			console.error('恢复数据失败:', error);
 			vscode.window.showErrorMessage('恢复阅读数据失败: ' + error.message);
 			this._statusBarItem.text = "reader: 准备就绪";
+			// 确保弹窗在出错时也是关闭的
+			if (this._floatingWindowManager.isVisible()) {
+				this._floatingWindowManager.hide();
+			}
 			this._isRestoring = false;
 		}
 	}
@@ -324,9 +1966,18 @@ class ThiefReaderWebviewProvider {
 			} else {
 				this._statusBarItem.text = `reader: 已恢复 ${file.name}`;
 			}
+			
+			// 确保弹窗在恢复后是关闭的
+			if (this._floatingWindowManager.isVisible()) {
+				this._floatingWindowManager.hide();
+			}
 		} catch (error) {
 			console.error('恢复阅读状态失败:', error);
 			this._statusBarItem.text = "reader: 准备就绪";
+			// 确保弹窗在出错时也是关闭的
+			if (this._floatingWindowManager.isVisible()) {
+				this._floatingWindowManager.hide();
+			}
 		}
 	}
 
@@ -588,15 +2239,15 @@ class ThiefReaderWebviewProvider {
 					case 'loadPastedContent':
 						await this._loadPastedContent(message.content);
 						break;
-					case 'setOpacity':
-						this._setOpacity(message.value);
-						break;
-					case 'getOpacity':
-						this._sendOpacityToView();
-						break;
-					case 'cleanupMissingFiles':
-						this._cleanupMissingFiles();
-						break;
+				case 'setOpacity':
+					this._setOpacity(message.value);
+					break;
+				case 'getOpacity':
+					this._sendOpacityToView();
+					break;
+				case 'cleanupMissingFiles':
+					this._cleanupMissingFiles();
+					break;
 				}
 			},
 			undefined,
@@ -1566,11 +3217,25 @@ class ThiefReaderWebviewProvider {
 			const chapter = file.chapters[this._currentChapter];
 			this._displayChapterText(chapter);
 			// _displayChapterText 已经设置了完整的状态栏文本（包括章节标题、滚动位置、具体文字）
+			
+			// 步骤5：切换文件时自动隐藏章节预览弹窗（在更新显示后）
+			if (this._floatingWindowManager.isVisible()) {
+				this._floatingWindowManager.hide();
+				// 隐藏弹窗后立即刷新状态栏，确保图标正确更新为📖
+				setTimeout(() => {
+					this._displayChapterText(chapter);
+				}, 50);
+			}
 		} else {
 			this._statusBarItem.text = `reader: 已选择 ${file.name} [${file.type}]`;
+			
+			// 如果没有章节内容，也要隐藏弹窗
+			if (this._floatingWindowManager.isVisible()) {
+				this._floatingWindowManager.hide();
+			}
 		}
 		
-		// 步骤5：保存状态并刷新界面
+		// 步骤6：保存状态并刷新界面
 		this._saveCurrentState();
 		this._refreshView();
 	}
@@ -1595,14 +3260,24 @@ class ThiefReaderWebviewProvider {
 			// 步骤3：恢复新章节的滚动位置
 			this._scrollOffset = this._getChapterPosition(chapterIndex);
 			
-		// 步骤4：显示内容
-		const chapter = this._currentFile.chapters[chapterIndex];
-		this._displayChapterText(chapter);
-		this._saveCurrentState();
-		// 通过消息更新章节高亮，而不是刷新整个视图（避免滚动位置重置）
-		this._updateChapterHighlight(chapterIndex);
+			// 步骤4：显示内容
+			const chapter = this._currentFile.chapters[chapterIndex];
+			this._displayChapterText(chapter);
+			this._saveCurrentState();
+			
+			// 步骤5：切换章节时自动隐藏章节预览弹窗（在更新显示后）
+			if (this._floatingWindowManager.isVisible()) {
+				this._floatingWindowManager.hide();
+				// 隐藏弹窗后立即刷新状态栏，确保图标正确更新为📖
+				setTimeout(() => {
+					this._displayChapterText(chapter);
+				}, 50);
+			}
+			
+			// 通过消息更新章节高亮，而不是刷新整个视图（避免滚动位置重置）
+			this._updateChapterHighlight(chapterIndex);
+		}
 	}
-}
 
 	/**
 	 * 更新章节高亮（通过消息机制，不刷新整个视图）
@@ -1656,7 +3331,13 @@ class ThiefReaderWebviewProvider {
 		const alpha = (this._opacity / 100).toFixed(2);
 		this._statusBarItem.color = `rgba(135, 135, 135, ${alpha})`;
 
-		this._statusBarItem.text = `reader: ${chapter.title}${scrollIndicator} - ${displayContent}`;
+		// 检查预览窗口是否显示
+		const previewStatus = this._floatingWindowManager.isVisible() ? '🔍' : '📖';
+		
+		// 更新状态栏文本和图标
+		this._statusBarItem.text = `reader: ${chapter.title}${scrollIndicator} - ${displayContent} ${previewStatus}`;
+		
+		console.log(`状态栏已更新: ${chapter.title} 偏移量${this._scrollOffset} 预览状态${previewStatus}`);
 	}
 
 	/**
@@ -1801,20 +3482,8 @@ class ThiefReaderWebviewProvider {
 	 * 切换状态栏文字的显示/隐藏 (Shift + 空格键)
 	 */
 	_toggleStatusBarVisibility() {
-		this._statusBarVisible = !this._statusBarVisible;
-		
-		if (this._statusBarVisible) {
-			// 显示状态栏文字
-			if (this._currentChapter !== null && this._currentFile) {
-				const chapter = this._currentFile.chapters[this._currentChapter];
-				this._displayChapterText(chapter);
-			} else {
-				this._statusBarItem.text = "reader: 准备就绪";
-			}
-		} else {
-			// 隐藏状态栏文字（只显示图标或简短提示）
-			this._statusBarItem.text = "reader: 📖";
-		}
+		// 新功能：切换章节预览显示
+		this.toggleChapterPreview();
 	}
 
 	/**
@@ -1900,7 +3569,36 @@ function activate(context) {
 		vscode.window.showInformationMessage('来自 thief-reader 的问候！');
 	});
 
+	// 章节预览功能的切换命令
+	const toggleChapterPreviewCommand = vscode.commands.registerCommand('thief-reader.toggleChapterPreview', function () {
+		provider.toggleChapterPreview();
+	});
+
+	const showHoverPreviewCommand = vscode.commands.registerCommand('thief-reader.showHoverPreview', function () {
+		// 直接显示悬停预览（用于测试）
+		if (provider._currentFile && provider._currentChapter !== null) {
+			const content = provider._mouseEventListener._getCurrentReaderContent();
+			if (content) {
+				provider._floatingWindowManager.showAt(content);
+				vscode.window.showInformationMessage('悬停预览已显示');
+			} else {
+				vscode.window.showWarningMessage('没有可预览的内容');
+			}
+		} else {
+			vscode.window.showWarningMessage('请先加载文件');
+		}
+	});
+
+	const hideHoverPreviewCommand = vscode.commands.registerCommand('thief-reader.hideHoverPreview', function () {
+		// 隐藏悬停预览
+		provider._floatingWindowManager.hide();
+		vscode.window.showInformationMessage('悬停预览已隐藏');
+	});
+
 	context.subscriptions.push(disposable);
+	context.subscriptions.push(toggleChapterPreviewCommand);
+	context.subscriptions.push(showHoverPreviewCommand);
+	context.subscriptions.push(hideHoverPreviewCommand);
 }
 
 // 当您的扩展被停用时调用此方法

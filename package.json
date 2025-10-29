@@ -2,7 +2,7 @@
   "name": "thief-reader",
   "displayName": "thief-reader",
   "description": "一个隐蔽的 VSCode 阅读器插件，支持 PDF、TXT、EPUB，使用 Alt + 方向键在状态栏中低调阅读",
-	"version": "0.0.8",
+	"version": "0.0.9",
   "publisher": "neroneroffy",
   "icon": "main-icon.png",
   "repository": "https://github.com/neroneroffy/thief-reader",
@@ -41,6 +41,15 @@
     }, {
       "command": "thief-reader.toggleVisibility",
       "title": "thief-reader: 切换状态栏文字显示/隐藏"
+    }, {
+      "command": "thief-reader.toggleChapterPreview",
+      "title": "thief-reader: 切换章节预览"
+    }, {
+      "command": "thief-reader.showHoverPreview",
+      "title": "thief-reader: 显示悬停预览"
+    }, {
+      "command": "thief-reader.hideHoverPreview",
+      "title": "thief-reader: 隐藏悬停预览"
     }],
     "keybindings": [{
       "command": "thief-reader.previousPage",
@@ -55,8 +64,14 @@
       "command": "thief-reader.scrollRight",
       "key": "alt+right"
     }, {
-      "command": "thief-reader.toggleVisibility",
+      "command": "thief-reader.toggleChapterPreview",
       "key": "shift+space"
+    }, {
+      "command": "thief-reader.showHoverPreview",
+      "key": "ctrl+alt+h"
+    }, {
+      "command": "thief-reader.hideHoverPreview",
+      "key": "ctrl+alt+shift+h"
     }],
     "viewsContainers": {
       "activitybar": [{
