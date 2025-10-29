@@ -31,7 +31,9 @@ class StorageManager {
 				// 保存阅读位置信息
 				lastChapter: file.lastChapter ?? null,
 				lastScrollOffset: file.lastScrollOffset ?? 0,
-				lastReadTime: file.lastReadTime ?? null
+				lastReadTime: file.lastReadTime ?? null,
+				// 保存章节位置映射
+				chapterPositions: file.chapterPositions || {}
 			}));
 			
 			await this._context.globalState.update('thief-reader.files', serializedFiles);
@@ -101,8 +103,8 @@ class StorageManager {
 class ThiefReaderWebviewProvider {
 	constructor(context) {
 		this._context = context;
-		this._pdfFiles = []; // 存储加载的PDF文件信息
-		this._currentPdf = null; // 当前选中的PDF
+		this._files = []; // 存储加载的所有文件信息（PDF/TXT/EPUB/粘贴内容）
+		this._currentFile = null; // 当前选中的文件
 		this._currentChapter = null; // 当前选中的章节
 		this._currentPage = 0; // 当前页码
 		this._scrollOffset = 0; // 文字滑动偏移量
@@ -168,7 +170,9 @@ class ThiefReaderWebviewProvider {
 						// 恢复阅读位置
 						lastChapter: savedFile.lastChapter ?? null,
 						lastScrollOffset: savedFile.lastScrollOffset ?? 0,
-						lastReadTime: savedFile.lastReadTime ?? null
+						lastReadTime: savedFile.lastReadTime ?? null,
+						// 恢复章节位置映射
+						chapterPositions: savedFile.chapterPositions || {}
 					});
 				} else {
 					// 本地文件需要检查和重新加载
@@ -186,7 +190,8 @@ class ThiefReaderWebviewProvider {
 							// 保留位置信息（虽然文件不存在）
 							lastChapter: savedFile.lastChapter ?? null,
 							lastScrollOffset: savedFile.lastScrollOffset ?? 0,
-							lastReadTime: savedFile.lastReadTime ?? null
+							lastReadTime: savedFile.lastReadTime ?? null,
+							chapterPositions: savedFile.chapterPositions || {}
 						});
 						failedFiles.push({
 							name: savedFile.name,
@@ -202,6 +207,8 @@ class ThiefReaderWebviewProvider {
 								fileInfo.lastChapter = savedFile.lastChapter ?? null;
 								fileInfo.lastScrollOffset = savedFile.lastScrollOffset ?? 0;
 								fileInfo.lastReadTime = savedFile.lastReadTime ?? null;
+								// 恢复章节位置映射
+								fileInfo.chapterPositions = savedFile.chapterPositions || {};
 								
 								// 验证章节索引是否有效
 								if (fileInfo.lastChapter !== null && fileInfo.lastChapter >= fileInfo.chapters.length) {
@@ -225,7 +232,8 @@ class ThiefReaderWebviewProvider {
 								// 保留位置信息
 								lastChapter: savedFile.lastChapter ?? null,
 								lastScrollOffset: savedFile.lastScrollOffset ?? 0,
-								lastReadTime: savedFile.lastReadTime ?? null
+								lastReadTime: savedFile.lastReadTime ?? null,
+								chapterPositions: savedFile.chapterPositions || {}
 							});
 							failedFiles.push({
 								name: savedFile.name,
@@ -237,7 +245,7 @@ class ThiefReaderWebviewProvider {
 			}
 			
 			// 更新文件列表
-			this._pdfFiles = restoredFiles;
+			this._files = restoredFiles;
 			
 			// 显示恢复结果（只在有文件时显示）
 			if (restoredFiles.length > 0) {
@@ -286,7 +294,7 @@ class ThiefReaderWebviewProvider {
 			}
 			
 			// 查找文件
-			const file = this._pdfFiles.find(f => f.id === state.currentFileId);
+			const file = this._files.find(f => f.id === state.currentFileId);
 			
 			if (!file) {
 				// 文件已被删除
@@ -304,7 +312,7 @@ class ThiefReaderWebviewProvider {
 			}
 			
 			// 恢复选择
-			this._currentPdf = file;
+			this._currentFile = file;
 			
 			// 使用文件自己保存的阅读位置
 			this._restoreFileReadingPosition(file);
@@ -370,16 +378,16 @@ class ThiefReaderWebviewProvider {
 	 * 清理缺失和错误的文件
 	 */
 	_cleanupMissingFiles() {
-		const validFiles = this._pdfFiles.filter(
+		const validFiles = this._files.filter(
 			f => f.status !== 'missing' && f.status !== 'error'
 		);
 		
-		const removedCount = this._pdfFiles.length - validFiles.length;
-		this._pdfFiles = validFiles;
+		const removedCount = this._files.length - validFiles.length;
+		this._files = validFiles;
 		
 		// 如果当前文件被清理了，清空选择
-		if (this._currentPdf && (this._currentPdf.status === 'missing' || this._currentPdf.status === 'error')) {
-			this._currentPdf = null;
+		if (this._currentFile && (this._currentFile.status === 'missing' || this._currentFile.status === 'error')) {
+			this._currentFile = null;
 			this._currentChapter = null;
 			this._scrollOffset = 0;
 			this._statusBarItem.text = "reader: 准备就绪";
@@ -392,18 +400,92 @@ class ThiefReaderWebviewProvider {
 	}
 
 	/**
+	 * 格式化时间戳
+	 * @param {number} timestamp - 时间戳
+	 * @returns {string} - 格式化后的时间字符串 YYYY-MM-DD HH:mm:ss
+	 */
+	_formatTimestamp(timestamp) {
+		const date = new Date(timestamp);
+		const year = date.getFullYear();
+		const month = String(date.getMonth() + 1).padStart(2, '0');
+		const day = String(date.getDate()).padStart(2, '0');
+		const hours = String(date.getHours()).padStart(2, '0');
+		const minutes = String(date.getMinutes()).padStart(2, '0');
+		const seconds = String(date.getSeconds()).padStart(2, '0');
+		
+		return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+	}
+
+	/**
+	 * 为粘贴内容生成友好的文件名
+	 * @param {string} content - 粘贴的文本内容
+	 * @returns {string} - 格式化的文件名
+	 */
+	_generatePasteFileName(content) {
+		// 1. 清理文本（去除多余空白和换行）
+		const cleanContent = content.trim().replace(/\s+/g, ' ');
+		
+		// 2. 提取前10个字符
+		const preview = cleanContent.substring(0, 10);
+		
+		// 3. 生成时间戳
+		const timestamp = Date.now();
+		const formattedTime = this._formatTimestamp(timestamp);
+		
+		// 4. 组合文件名
+		if (preview.length === 0) {
+			return `[粘贴内容]（空）（${formattedTime}）`;
+		} else if (cleanContent.length > 10) {
+			return `[粘贴内容]${preview}...（${formattedTime}）`;
+		} else {
+			return `[粘贴内容]${preview}（${formattedTime}）`;
+		}
+	}
+
+	/**
 	 * 保存文件的阅读位置
 	 */
 	_saveFileReadingPosition(fileId) {
 		if (!fileId) return;
 		
-		const file = this._pdfFiles.find(f => f.id === fileId);
+		const file = this._files.find(f => f.id === fileId);
 		if (!file) return;
 		
 		// 更新文件的阅读位置
 		file.lastChapter = this._currentChapter;
 		file.lastScrollOffset = this._scrollOffset;
 		file.lastReadTime = Date.now();
+	}
+
+	/**
+	 * 保存当前章节的滚动位置
+	 */
+	_saveChapterPosition(chapterIndex, scrollOffset) {
+		if (!this._currentFile || chapterIndex === null || chapterIndex === undefined) return;
+		
+		// 初始化 chapterPositions（如果不存在）
+		if (!this._currentFile.chapterPositions) {
+			this._currentFile.chapterPositions = {};
+		}
+		
+		// 保存章节位置
+		this._currentFile.chapterPositions[chapterIndex] = scrollOffset;
+	}
+
+	/**
+	 * 获取章节的保存位置
+	 */
+	_getChapterPosition(chapterIndex) {
+		if (!this._currentFile || chapterIndex === null || chapterIndex === undefined) {
+			return 0;
+		}
+		
+		// 如果没有 chapterPositions 或该章节没有保存位置，返回0
+		if (!this._currentFile.chapterPositions) {
+			return 0;
+		}
+		
+		return this._currentFile.chapterPositions[chapterIndex] ?? 0;
 	}
 
 	/**
@@ -444,8 +526,8 @@ class ThiefReaderWebviewProvider {
 		}
 		
 		// 更新当前文件的阅读位置
-		if (this._currentPdf) {
-			this._saveFileReadingPosition(this._currentPdf.id);
+		if (this._currentFile) {
+			this._saveFileReadingPosition(this._currentFile.id);
 		}
 		
 		// 清除之前的定时器
@@ -457,12 +539,12 @@ class ThiefReaderWebviewProvider {
 		this._saveDebounceTimer = setTimeout(async () => {
 			try {
 				// 保存文件列表（包含每个文件的阅读位置）
-				await this._storageManager.saveFiles(this._pdfFiles);
+				await this._storageManager.saveFiles(this._files);
 				
 				// 保存当前选中的文件ID
-				if (this._currentPdf) {
+				if (this._currentFile) {
 					await this._storageManager.saveReadingState({
-						currentFileId: this._currentPdf.id
+						currentFileId: this._currentFile.id
 					});
 				}
 			} catch (error) {
@@ -492,16 +574,16 @@ class ThiefReaderWebviewProvider {
 			async message => {
 				switch (message.command) {
 					case 'selectPdf':
-						await this._selectPdfFile();
+						await this._selectFile();
 						break;
 					case 'selectFile':
-						await this._selectPdfFromList(message.fileId);
+						await this._selectFileFromList(message.fileId);
 						break;
 					case 'selectChapter':
 						await this._selectChapter(message.chapterId);
 						break;
 					case 'removeFile':
-						this._removePdfFile(message.fileId);
+						this._removeFile(message.fileId);
 						break;
 					case 'loadPastedContent':
 						await this._loadPastedContent(message.content);
@@ -529,7 +611,7 @@ class ThiefReaderWebviewProvider {
 	 * 获取 WebView 的 HTML 内容
 	 */
 	_getHtmlContent() {
-		const fileListHtml = this._pdfFiles.map(file => {
+		const fileListHtml = this._files.map(file => {
 			let statusIcon = '';
 			let statusText = '';
 			const isDisabled = file.status === 'missing' || file.status === 'error';
@@ -543,7 +625,7 @@ class ThiefReaderWebviewProvider {
 			}
 			
 			return `
-				<div class="file-item ${this._currentPdf && this._currentPdf.id === file.id ? 'active' : ''} ${isDisabled ? 'disabled' : ''}" 
+				<div class="file-item ${this._currentFile && this._currentFile.id === file.id ? 'active' : ''} ${isDisabled ? 'disabled' : ''}" 
 				     data-file-id="${file.id}" 
 				     onclick="${isDisabled ? '' : `selectFile('${file.id}')`}"
 				     style="display: flex; align-items: center; justify-content: space-between;">
@@ -555,8 +637,8 @@ class ThiefReaderWebviewProvider {
 			`;
 		}).join('');
 
-		const chapterListHtml = this._currentPdf && this._currentPdf.chapters ? 
-			this._currentPdf.chapters.map((chapter, index) => `
+		const chapterListHtml = this._currentFile && this._currentFile.chapters ? 
+			this._currentFile.chapters.map((chapter, index) => `
 				<div class="chapter-item ${this._currentChapter === index ? 'active' : ''}" data-chapter-id="${index}">
 					<div class="chapter-title" onclick="selectChapter(${index})">${chapter.title}</div>
 				</div>
@@ -825,20 +907,23 @@ class ThiefReaderWebviewProvider {
 					vscode.postMessage({ command: 'getOpacity' });
 				});
 
-				// 监听来自扩展的消息
-				window.addEventListener('message', event => {
-					const message = event.data;
-					switch (message.command) {
-						case 'setOpacity':
-							const slider = document.getElementById('opacity-slider');
-							const valueSpan = document.getElementById('opacity-value');
-							if (slider && valueSpan) {
-								slider.value = message.value;
-								valueSpan.textContent = message.value;
-							}
-							break;
-					}
-				});
+			// 监听来自扩展的消息
+			window.addEventListener('message', event => {
+				const message = event.data;
+				switch (message.command) {
+					case 'setOpacity':
+						const slider = document.getElementById('opacity-slider');
+						const valueSpan = document.getElementById('opacity-value');
+						if (slider && valueSpan) {
+							slider.value = message.value;
+							valueSpan.textContent = message.value;
+						}
+						break;
+					case 'updateChapterHighlight':
+						updateChapterHighlightUI(message.chapterIndex);
+						break;
+				}
+			});
 
 				function selectPdf() {
 					vscode.postMessage({ command: 'selectPdf' });
@@ -884,18 +969,42 @@ class ThiefReaderWebviewProvider {
 					});
 				}
 
-				function cleanupMissingFiles() {
-					vscode.postMessage({ command: 'cleanupMissingFiles' });
+			function cleanupMissingFiles() {
+				vscode.postMessage({ command: 'cleanupMissingFiles' });
+			}
+
+			/**
+			 * 更新章节高亮UI（不刷新整个页面，避免滚动位置重置）
+			 */
+			function updateChapterHighlightUI(chapterIndex) {
+				// 移除所有章节的 active 类
+				const chapterItems = document.querySelectorAll('.chapter-item');
+				chapterItems.forEach(item => {
+					item.classList.remove('active');
+				});
+				
+				// 添加 active 类到选中的章节
+				const selectedChapter = document.querySelector(\`.chapter-item[data-chapter-id="\${chapterIndex}"]\`);
+				if (selectedChapter) {
+					selectedChapter.classList.add('active');
+					
+					// 自动滚动到选中的章节（smooth 平滑滚动）
+					selectedChapter.scrollIntoView({ 
+						behavior: 'smooth',  // 平滑滚动动画
+						block: 'nearest',    // 如果已经可见，不滚动；否则滚动到最近的边缘
+						inline: 'nearest'
+					});
 				}
-			</script>
-		</body>
-		</html>`;
+			}
+		</script>
+	</body>
+	</html>`;
 	}
 
 	/**
 	 * 选择文件（支持PDF、TXT和EPUB）
 	 */
-	async _selectPdfFile() {
+	async _selectFile() {
 		try {
 			const options = {
 				canSelectMany: false,
@@ -968,14 +1077,16 @@ class ThiefReaderWebviewProvider {
 				// 初始化阅读位置
 				lastChapter: null,
 				lastScrollOffset: 0,
-				lastReadTime: null
+				lastReadTime: null,
+				// 初始化章节位置映射
+				chapterPositions: {}
 			};
 
 			// 检查是否已存在相同路径的文件（按路径检查，不是文件名）
-			const existingIndex = this._pdfFiles.findIndex(f => f.path === filePath);
+			const existingIndex = this._files.findIndex(f => f.path === filePath);
 			if (existingIndex !== -1) {
 				// 找到相同路径的文件，询问用户是否重新加载
-				const oldFile = this._pdfFiles[existingIndex];
+				const oldFile = this._files[existingIndex];
 				const selection = await vscode.window.showInformationMessage(
 					`文件 "${fileName}" 已存在，是否重新加载？`,
 					{ modal: false },
@@ -989,6 +1100,7 @@ class ThiefReaderWebviewProvider {
 					fileInfo.lastChapter = oldFile.lastChapter;
 					fileInfo.lastScrollOffset = oldFile.lastScrollOffset;
 					fileInfo.lastReadTime = oldFile.lastReadTime;
+					fileInfo.chapterPositions = oldFile.chapterPositions || {};
 					
 					// 验证章节索引是否仍然有效
 					if (fileInfo.lastChapter !== null && fileInfo.lastChapter >= fileInfo.chapters.length) {
@@ -999,7 +1111,7 @@ class ThiefReaderWebviewProvider {
 						);
 					}
 					
-					this._pdfFiles[existingIndex] = fileInfo;
+					this._files[existingIndex] = fileInfo;
 					this._statusBarItem.text = `reader: 已重新加载 ${fileName}`;
 					vscode.window.showInformationMessage(`成功重新加载${fileInfo.type}文件: ${fileName}`);
 				} else {
@@ -1009,7 +1121,7 @@ class ThiefReaderWebviewProvider {
 				}
 			} else {
 				// 新文件，直接添加
-				this._pdfFiles.push(fileInfo);
+				this._files.push(fileInfo);
 				this._statusBarItem.text = `reader: 已加载 ${fileName}`;
 				vscode.window.showInformationMessage(`成功加载${fileInfo.type}文件: ${fileName}`);
 			}
@@ -1184,7 +1296,8 @@ class ThiefReaderWebviewProvider {
 			// 解析章节
 			const chapters = this._extractChaptersWithFallback(content);
 			
-			const fileName = `粘贴内容_${Date.now()}`;
+			// 生成友好的文件名
+			const fileName = this._generatePasteFileName(content);
 			const fileInfo = {
 				id: Date.now().toString(),
 				name: fileName,
@@ -1197,14 +1310,16 @@ class ThiefReaderWebviewProvider {
 				// 初始化阅读位置
 				lastChapter: null,
 				lastScrollOffset: 0,
-				lastReadTime: null
+				lastReadTime: null,
+				// 初始化章节位置映射
+				chapterPositions: {}
 			};
 
 			// 添加到文件列表
-			this._pdfFiles.push(fileInfo);
+			this._files.push(fileInfo);
 			
 			// 自动选中这个文件
-			this._currentPdf = fileInfo;
+			this._currentFile = fileInfo;
 			this._currentChapter = chapters.length > 0 ? 0 : null;
 			this._currentPage = 0;
 			this._scrollOffset = 0;
@@ -1230,12 +1345,13 @@ class ThiefReaderWebviewProvider {
 		// 先尝试正常的章节提取
 		const chapters = this._extractChapters(text);
 		
-		// 如果成功提取到章节（不是默认的"全文内容"），直接返回
-		if (chapters.length > 1 || (chapters.length === 1 && chapters[0].title !== '全文内容')) {
+		// 如果成功提取到章节，直接返回
+		if (chapters.length > 0) {
 			return chapters;
 		}
 		
-		// 如果没有识别出章节，按段落分割，每段用前10个字作为标题
+		// 如果没有识别出章节，使用 Fallback 方案
+		// 按段落分割，每段用前10个字作为标题
 		return this._createFallbackChapters(text);
 	}
 
@@ -1248,22 +1364,44 @@ class ThiefReaderWebviewProvider {
 		
 		if (paragraphs.length === 0) {
 			// 如果连段落都没有，按整行分割
-			const lines = text.split('\n').filter(line => line.trim().length > 10);
+			const lines = text.split('\n').filter(line => line.trim().length > 0);
 			
-			lines.forEach((line, index) => {
-				const trimmedLine = line.trim();
-				// 取前10个字符作为标题
-				const title = trimmedLine.substring(0, 10) + (trimmedLine.length > 10 ? '...' : '');
-				
-				chapters.push({
-					title: title,
-					startLine: 0,
-					content: [trimmedLine]
+			if (lines.length === 0) {
+				// 场景1：完全空内容
+				const cleanContent = text.trim().replace(/\s+/g, ' ');
+				if (cleanContent.length === 0) {
+					// 空内容
+					chapters.push({
+						title: '（空内容）',
+						startLine: 0,
+						content: []
+					});
+				} else {
+					// 有内容但太短（小于10个字符）
+					const title = cleanContent.substring(0, 10);
+					chapters.push({
+						title: title || '（空内容）',
+						startLine: 0,
+						content: [cleanContent]
+					});
+				}
+			} else {
+				// 场景2：有行但没有段落分隔符
+				lines.forEach((line) => {
+					const trimmedLine = line.trim();
+					// 取前10个字符作为标题
+					const title = trimmedLine.substring(0, 10) + (trimmedLine.length > 10 ? '...' : '');
+					
+					chapters.push({
+						title: title || '（无标题）',
+						startLine: 0,
+						content: [trimmedLine]
+					});
 				});
-			});
+			}
 		} else {
-			// 按段落分割
-			paragraphs.forEach((paragraph, index) => {
+			// 场景3：有段落分隔符，按段落分割
+			paragraphs.forEach((paragraph) => {
 				const lines = paragraph.split('\n').filter(line => line.trim().length > 0);
 				if (lines.length > 0) {
 					const firstLine = lines[0].trim();
@@ -1271,7 +1409,7 @@ class ThiefReaderWebviewProvider {
 					const title = firstLine.substring(0, 10) + (firstLine.length > 10 ? '...' : '');
 					
 					chapters.push({
-						title: title,
+						title: title || '（无标题）',
 						startLine: 0,
 						content: lines
 					});
@@ -1279,13 +1417,12 @@ class ThiefReaderWebviewProvider {
 			});
 		}
 		
-		// 如果还是没有章节，创建单个章节
+		// 最终兜底：确保至少有一个章节
 		if (chapters.length === 0) {
-			const firstLine = text.trim().substring(0, 10) + '...';
 			chapters.push({
-				title: firstLine,
+				title: '（空内容）',
 				startLine: 0,
-				content: text.split('\n').filter(line => line.trim().length > 0)
+				content: []
 			});
 		}
 		
@@ -1378,15 +1515,6 @@ class ThiefReaderWebviewProvider {
 			} else if (currentChapter && line.length > 5) {
 				// 添加内容到当前章节（降低最小长度要求）
 				currentChapter.content.push(line);
-			} else if (!currentChapter && line.length > 5) {
-				// 如果还没有章节，创建一个默认章节
-				if (chapters.length === 0) {
-					currentChapter = {
-						title: '开始内容',
-						startLine: i,
-						content: [line]
-					};
-				}
 			}
 		}
 
@@ -1395,38 +1523,16 @@ class ThiefReaderWebviewProvider {
 			chapters.push(currentChapter);
 		}
 
-		// 如果没有检测到章节，按段落自动分割
-		if (chapters.length === 0) {
-			const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 0);
-			if (paragraphs.length > 1) {
-				paragraphs.forEach((paragraph, index) => {
-					const paragraphLines = paragraph.split('\n').filter(line => line.trim().length > 0);
-					if (paragraphLines.length > 0) {
-						chapters.push({
-							title: `段落 ${index + 1}`,
-							startLine: 0,
-							content: paragraphLines
-						});
-					}
-				});
-			} else {
-				// 最后的备选方案：创建单个章节
-				chapters.push({
-					title: '全文内容',
-					startLine: 0,
-					content: lines.filter(line => line.trim().length > 0)
-				});
-			}
-		}
-
+		// 如果没有检测到章节，返回空数组
+		// 让调用者使用 _extractChaptersWithFallback 来处理
 		return chapters;
 	}
 
 	/**
 	 * 从列表中选择文件
 	 */
-	async _selectPdfFromList(fileId) {
-		const file = this._pdfFiles.find(f => f.id === fileId);
+	async _selectFileFromList(fileId) {
+		const file = this._files.find(f => f.id === fileId);
 		if (!file) return;
 		
 		// 检查文件状态
@@ -1445,12 +1551,12 @@ class ThiefReaderWebviewProvider {
 		}
 		
 		// 步骤1：保存当前文件的阅读位置
-		if (this._currentPdf && this._currentPdf.id !== fileId) {
-			this._saveFileReadingPosition(this._currentPdf.id);
+		if (this._currentFile && this._currentFile.id !== fileId) {
+			this._saveFileReadingPosition(this._currentFile.id);
 		}
 		
 		// 步骤2：切换到新文件
-		this._currentPdf = file;
+		this._currentFile = file;
 		
 		// 步骤3：恢复新文件的阅读位置
 		this._restoreFileReadingPosition(file);
@@ -1459,7 +1565,7 @@ class ThiefReaderWebviewProvider {
 		if (this._currentChapter !== null && file.chapters && file.chapters.length > 0) {
 			const chapter = file.chapters[this._currentChapter];
 			this._displayChapterText(chapter);
-			this._statusBarItem.text = `reader: ${file.name} - ${chapter.title}`;
+			// _displayChapterText 已经设置了完整的状态栏文本（包括章节标题、滚动位置、具体文字）
 		} else {
 			this._statusBarItem.text = `reader: 已选择 ${file.name} [${file.type}]`;
 		}
@@ -1473,18 +1579,40 @@ class ThiefReaderWebviewProvider {
 	 * 选择章节
 	 */
 	async _selectChapter(chapterId) {
-		if (!this._currentPdf || !this._currentPdf.chapters) return;
+		if (!this._currentFile || !this._currentFile.chapters) return;
 
 		const chapterIndex = parseInt(chapterId);
-		if (chapterIndex >= 0 && chapterIndex < this._currentPdf.chapters.length) {
+		if (chapterIndex >= 0 && chapterIndex < this._currentFile.chapters.length) {
+			// 步骤1：保存当前章节的滚动位置
+			if (this._currentChapter !== null && this._currentChapter !== chapterIndex) {
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+			}
+			
+			// 步骤2：切换到新章节
 			this._currentChapter = chapterIndex;
 			this._currentPage = 0;
-			this._scrollOffset = 0; // 重置滑动偏移
 			
-			const chapter = this._currentPdf.chapters[chapterIndex];
-			this._displayChapterText(chapter);
-			this._saveCurrentState();
-			this._refreshView();
+			// 步骤3：恢复新章节的滚动位置
+			this._scrollOffset = this._getChapterPosition(chapterIndex);
+			
+		// 步骤4：显示内容
+		const chapter = this._currentFile.chapters[chapterIndex];
+		this._displayChapterText(chapter);
+		this._saveCurrentState();
+		// 通过消息更新章节高亮，而不是刷新整个视图（避免滚动位置重置）
+		this._updateChapterHighlight(chapterIndex);
+	}
+}
+
+	/**
+	 * 更新章节高亮（通过消息机制，不刷新整个视图）
+	 */
+	_updateChapterHighlight(chapterIndex) {
+		if (this._view) {
+			this._view.webview.postMessage({
+				command: 'updateChapterHighlight',
+				chapterIndex: chapterIndex
+			});
 		}
 	}
 
@@ -1534,17 +1662,17 @@ class ThiefReaderWebviewProvider {
 	/**
 	 * 删除文件
 	 */
-	_removePdfFile(fileId) {
-		const index = this._pdfFiles.findIndex(f => f.id === fileId);
+	_removeFile(fileId) {
+		const index = this._files.findIndex(f => f.id === fileId);
 		if (index !== -1) {
-			const file = this._pdfFiles[index];
+			const file = this._files[index];
 			const fileName = file.name;
 			const fileType = file.type;
-			this._pdfFiles.splice(index, 1);
+			this._files.splice(index, 1);
 			
 			// 如果删除的是当前选中的文件，清空选择
-			if (this._currentPdf && this._currentPdf.id === fileId) {
-				this._currentPdf = null;
+			if (this._currentFile && this._currentFile.id === fileId) {
+				this._currentFile = null;
 				this._currentChapter = null;
 				this._currentPage = 0;
 				this._scrollOffset = 0;
@@ -1597,14 +1725,16 @@ class ThiefReaderWebviewProvider {
 	 * 上一页 (Alt + Shift + 左方向键) - 快速向前跳转80个字符
 	 */
 	_previousPage() {
-		if (this._currentChapter !== null && this._currentPdf) {
+		if (this._currentChapter !== null && this._currentFile) {
 			const jumpSize = 80; // 跳转一个显示窗口的大小
 			
 			if (this._scrollOffset > 0) {
 				this._scrollOffset = Math.max(0, this._scrollOffset - jumpSize);
-				const chapter = this._currentPdf.chapters[this._currentChapter];
+				const chapter = this._currentFile.chapters[this._currentChapter];
 				this._displayChapterText(chapter);
-				this._saveCurrentState(); // 保存位置
+				// 保存当前章节位置
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+				this._saveCurrentState();
 			}
 		}
 	}
@@ -1613,8 +1743,8 @@ class ThiefReaderWebviewProvider {
 	 * 下一页 (Alt + Shift + 右方向键) - 快速向后跳转80个字符
 	 */
 	_nextPage() {
-		if (this._currentChapter !== null && this._currentPdf) {
-			const chapter = this._currentPdf.chapters[this._currentChapter];
+		if (this._currentChapter !== null && this._currentFile) {
+			const chapter = this._currentFile.chapters[this._currentChapter];
 			const fullContent = chapter.content.join(' ');
 			const jumpSize = 80; // 跳转一个显示窗口的大小
 			const maxScrollOffset = Math.max(0, fullContent.length - 1);
@@ -1622,7 +1752,9 @@ class ThiefReaderWebviewProvider {
 			if (this._scrollOffset < maxScrollOffset) {
 				this._scrollOffset = Math.min(maxScrollOffset, this._scrollOffset + jumpSize);
 				this._displayChapterText(chapter);
-				this._saveCurrentState(); // 保存位置
+				// 保存当前章节位置
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+				this._saveCurrentState();
 			}
 		}
 	}
@@ -1631,14 +1763,16 @@ class ThiefReaderWebviewProvider {
 	 * 向左滑动 (Alt + 左方向键) - 在整个章节中向左滑动
 	 */
 	_scrollLeft() {
-		if (this._currentChapter !== null && this._currentPdf) {
+		if (this._currentChapter !== null && this._currentFile) {
 			const scrollStep = 10; // 每次滑动10个字符
 			
 			if (this._scrollOffset > 0) {
 				this._scrollOffset = Math.max(0, this._scrollOffset - scrollStep);
-				const chapter = this._currentPdf.chapters[this._currentChapter];
+				const chapter = this._currentFile.chapters[this._currentChapter];
 				this._displayChapterText(chapter);
-				this._saveCurrentState(); // 保存滚动位置
+				// 保存当前章节位置
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+				this._saveCurrentState();
 			}
 		}
 	}
@@ -1647,16 +1781,18 @@ class ThiefReaderWebviewProvider {
 	 * 向右滑动 (Alt + 右方向键) - 在整个章节中向右滑动
 	 */
 	_scrollRight() {
-		if (this._currentChapter !== null && this._currentPdf) {
+		if (this._currentChapter !== null && this._currentFile) {
 			const scrollStep = 10; // 每次滑动10个字符
-			const chapter = this._currentPdf.chapters[this._currentChapter];
+			const chapter = this._currentFile.chapters[this._currentChapter];
 			const fullContent = chapter.content.join(' ');
 			const maxScrollOffset = Math.max(0, fullContent.length - 1);
 			
 			if (this._scrollOffset < maxScrollOffset) {
 				this._scrollOffset = Math.min(maxScrollOffset, this._scrollOffset + scrollStep);
 				this._displayChapterText(chapter);
-				this._saveCurrentState(); // 保存滚动位置
+				// 保存当前章节位置
+				this._saveChapterPosition(this._currentChapter, this._scrollOffset);
+				this._saveCurrentState();
 			}
 		}
 	}
@@ -1669,8 +1805,8 @@ class ThiefReaderWebviewProvider {
 		
 		if (this._statusBarVisible) {
 			// 显示状态栏文字
-			if (this._currentChapter !== null && this._currentPdf) {
-				const chapter = this._currentPdf.chapters[this._currentChapter];
+			if (this._currentChapter !== null && this._currentFile) {
+				const chapter = this._currentFile.chapters[this._currentChapter];
 				this._displayChapterText(chapter);
 			} else {
 				this._statusBarItem.text = "reader: 准备就绪";
@@ -1700,8 +1836,8 @@ class ThiefReaderWebviewProvider {
 	 * 应用透明度到状态栏
 	 */
 	_applyOpacityToStatusBar() {
-		if (this._statusBarItem && this._currentChapter !== null && this._currentPdf) {
-			const chapter = this._currentPdf.chapters[this._currentChapter];
+		if (this._statusBarItem && this._currentChapter !== null && this._currentFile) {
+			const chapter = this._currentFile.chapters[this._currentChapter];
 			this._displayChapterText(chapter);
 		}
 	}

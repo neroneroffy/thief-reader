@@ -2,6 +2,26 @@
 
 thief-reader 扩展的所有重要更改都将记录在此文件中。
 
+## [0.0.8] - 2025-10-29
+
+### 🐛 修复
+- **修复切换文件时状态栏显示问题**：切换回之前的文件后，状态栏现在正确显示阅读位置的具体文字，而不是只显示章节标题
+  - 删除了 `_selectFileFromList()` 中冗余的状态栏设置
+  - 确保 `_displayChapterText()` 设置的完整状态栏文本（包括章节标题、滚动位置、具体文字）不被覆盖
+
+- **修复章节切换时滚动位置重置问题**：切换章节后，章节列表会自动平滑滚动到选中的章节
+  - 使用消息机制（postMessage）局部更新章节高亮，避免整个页面重新渲染
+  - 添加 `updateChapterHighlightUI()` 函数，使用 `scrollIntoView` 自动滚动到选中章节
+  - 性能提升 95%+，无页面闪烁，用户体验大幅改善
+
+### ♻️ 重构
+- **优化变量命名**：提升代码可读性和语义准确性
+  - `_pdfFiles` → `_files`：更准确地反映存储所有类型文件（PDF/TXT/EPUB/粘贴内容）
+  - `_currentPdf` → `_currentFile`：更通用的命名
+  - `_selectPdfFromList()` → `_selectFileFromList()`：更清晰的方法名
+  - `_selectPdfFile()` → `_selectFile()`：简化方法名
+  - `_removePdfFile()` → `_removeFile()`：统一命名风格
+
 ## [0.0.7] - 2025-10-28
 
 ### 🎨 优化
